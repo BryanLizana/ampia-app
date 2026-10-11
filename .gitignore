@@ -1,0 +1,25 @@
+# Compilación
+build/
+build.log
+*.exe
+*.pdb
+
+# Dependencias que no se suben
+# JUCE se descarga sola (CMake FetchContent); los SDK de Steinberg tienen
+# licencia propia y no se pueden redistribuir.
+JUCE/
+asiosdk/
+vst2sdk/
+
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Editores / sistema
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
