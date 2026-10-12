@@ -8,8 +8,8 @@
 // cada una en su pista; deshacer/rehacer va por toma completa.
 // Las tomas siguientes duran lo mismo que el loop base: si se sigue
 // grabando al pasar el final, se vuelve al inicio y se graba encima.
-// Con el metrónomo activo hay un compás de cuenta antes de grabar desde
-// parado, y la toma base se ajusta a compases enteros. Sin metrónomo el
+// Con el metrónomo activo la toma empieza al apretar REC (el click arranca
+// ahí en el tiempo 1, sin cuenta previa) y la toma base se ajusta a compases enteros. Sin metrónomo el
 // largo es libre y el tempo se ajusta al loop (como el Looper de Ableton).
 // Con loop, el click sale de la posición dentro del loop: nunca se corre.
 // Las fuentes de voz se graban también sin efecto (dry), para poder cambiar la
@@ -80,7 +80,7 @@ public:
     void setMetronome (bool on)    { metronomeOn = on; }
 
     // REC al tocar (activo por defecto): sin metrónomo, REC queda esperando y la toma
-    // empieza con el primer sonido de una entrada armada. Con metrónomo, compás de cuenta.
+    // empieza con el primer sonido de una entrada armada. Con metrónomo graba al apretar.
     void setWaitForSound (bool on) { waitForSound = on; }
     bool isWaitForSound() const    { return waitForSound; }
     bool isWaiting() const         { return waiting; }
@@ -92,8 +92,6 @@ public:
     Track& getTrack (int index)    { return tracks[(size_t) index]; }
     bool isPlaying() const         { return playing; }
     bool isRecording() const       { return recording; }
-    bool isCountingIn() const      { return countingIn; }
-    int getCountInBeat() const     { return countInBeat; }
     bool hasFreeTrack (int needed) const;
     double getProgress() const;
 
@@ -145,10 +143,10 @@ private:
 
     std::atomic<bool> recRequest { false }, playRequest { false }, cancelRequest { false };
     std::atomic<double> seekRequest { -1.0 };   // -1 = ninguno
-    std::atomic<bool> playing { false }, recording { false }, countingIn { false };
+    std::atomic<bool> playing { false }, recording { false };
     std::atomic<bool> metronomeOn { false }, waitForSound { true }, waiting { false };
     std::atomic<float> bpm { 100.0f };
-    std::atomic<int> loopLength { 0 }, countInBeat { 0 }, outputLatency { 0 };
+    std::atomic<int> loopLength { 0 }, outputLatency { 0 };
     std::atomic<juce::int64> position { 0 };
     std::array<std::atomic<float>, maxSources> sourceVolume {};   // último volumen de cada entrada
 
@@ -159,6 +157,6 @@ private:
     std::array<int, maxSources> recSlots {};     // pistas que se están grabando
     std::array<int, maxSources> recComps {};     // compensación de latencia de cada una
     int numRecording = 0;
-    juce::int64 recIndex = 0, countInPos = 0, freeClickPos = 0;
+    juce::int64 recIndex = 0, freeClickPos = 0;
     std::atomic<int> nextOrder { 1 };
 };

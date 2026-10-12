@@ -77,6 +77,8 @@ public:
         std::unique_ptr<juce::AudioPluginInstance> plugin;   // Audio: efecto; MIDI: instrumento
         juce::File pluginFile;
         bool pluginFailed = false;        // el guardado no se pudo abrir (no está instalado...)
+        int shareGroup = -1;              // Guitarra: grupo que comparte un amplificador (-1 = propio)
+        juce::MemoryBlock ampState;       // su preset mientras la copia compartida la tiene otra
         std::atomic<bool> armed { false }, monitor { true };
         std::atomic<float> volume { 1.0f };   // como el fader de Ableton: no cambia lo grabado
         std::atomic<float> peak { 0.0f };
@@ -109,6 +111,23 @@ public:
     int getActiveGuitar() const { return activeGuitar; }
     int countGuitars() const;
     int firstGuitar() const;                    // -1 si no hay
+
+    // Amplificador compartido: varias guitarras usan una sola copia del plugin (un solo
+    // AmpliTube), cada una con su preset. La copia la tiene la guitarra activa del grupo;
+    // al cambiar de guitarra se mueve y se le carga el preset de la nueva (corte breve).
+    void shareAmp (int index, int from);         // index pasa a usar el amplificador de from
+    // Por defecto AmpliTube se comparte: si otra guitarra ya lo tiene, la guitarra que lo
+    // elige usa esa copia. Devuelve esa guitarra, o -1 si hay que abrir uno nuevo.
+    int ampliTubeToShare (int index, const juce::File& file) const;
+    void unshareAmp (int index);                 // deja el grupo (queda sin amplificador)
+    void takeSharedAmp (int index);              // trae la copia a esta guitarra (apaga la que la tenía)
+    bool isSharedWaiting (int index) const;      // es del grupo, pero la copia la tiene otra
+    bool isShared (int index) const { return channels[(size_t) index].shareGroup >= 0; }
+    std::function<void (int from, int to)> onSharedAmpMoved;   // hilo de mensajes (mover la ventana del plugin)
+
+    // Entradas con AmpliTube que se están procesando (OIR o armadas). Dos copias a la vez
+    // de AmpliTube 5 pueden cerrar la app.
+    juce::StringArray getActiveAmpliTubes() const;
 
     // Armar por número de pista visible (1 = la primera usada).
     void toggleArm (int number);
@@ -157,6 +176,10 @@ private:
     std::unique_ptr<juce::AudioPluginInstance> createPlugin (const juce::File& file, juce::String& error);
     void prepare (juce::AudioPluginInstance&);
     void sizeChannelBuffer (Channel&);
+    int sharedHolder (int group) const;          // guitarra que tiene la copia (-1 = ninguna)
+    int groupLeader (int group) const;           // la que la carga al arrancar
+    void moveSharedAmp (int from, int to);
+    int nextShareGroup = 0;
 
     juce::AudioPluginFormatManager formatManager;
     std::array<Channel, maxChannels> channels;

@@ -237,6 +237,8 @@ void Engine::start()
                 c.armed = e->getBoolAttribute ("armed", c.armed);
                 c.monitor = e->getBoolAttribute ("monitor", true);
                 c.volume = (float) e->getDoubleAttribute ("volume", 1.0);
+                c.shareGroup = c.type == ChannelType::Guitar ? e->getIntAttribute ("shareGroup", -1) : -1;
+                nextShareGroup = juce::jmax (nextShareGroup, c.shareGroup + 1);
                 c.used = true;
             }
         }
@@ -246,6 +248,14 @@ void Engine::start()
     if (const int a = activeGuitar; ! juce::isPositiveAndBelow (a, maxChannels)
         || ! channels[(size_t) a].used || channels[(size_t) a].type != ChannelType::Guitar)
         activeGuitar = firstGuitar();
+
+    // Amplificador compartido: solo una guitarra del grupo lo abre; las otras guardan su preset.
+    for (int i = 0; i < maxChannels; ++i)
+    {
+        auto& c = channels[(size_t) i];
+        if (c.used && c.shareGroup >= 0 && groupLeader (c.shareGroup) != i)
+            channelStateFile (i).loadFileAsData (c.ampState);
+    }
 
     library.scan();
     library.loadFrom (saved.get());
@@ -540,6 +550,7 @@ void Engine::saveSettings() const
         e->setAttribute ("armed", c.armed.load());
         e->setAttribute ("monitor", c.monitor.load());
         e->setAttribute ("volume", c.volume.load());
+        e->setAttribute ("shareGroup", c.shareGroup);
     }
 
     if (auto dev = deviceManager.createStateXml())
@@ -560,6 +571,10 @@ void Engine::saveState() const
             juce::MemoryBlock state;
             c.plugin->getStateInformation (state);
             channelStateFile (i).replaceWithData (state.getData(), state.getSize());
+        }
+        else if (c.used && c.shareGroup >= 0 && c.ampState.getSize() > 0)
+        {
+            channelStateFile (i).replaceWithData (c.ampState.getData(), c.ampState.getSize());
         }
     }
 }
@@ -654,6 +669,8 @@ void Engine::selectGuitar (int index)
         || channels[(size_t) index].type != ChannelType::Guitar)
         return;
 
+    takeSharedAmp (index);
+
     // Solo la activa suena y se graba (el resto de las entradas no se tocan).
     for (int i = 0; i < maxChannels; ++i)
     {
@@ -722,6 +739,8 @@ int Engine::addChannel (ChannelType type)
             c.midiDevice = {};
             c.pluginFile = {};
             c.plugin = nullptr;
+            c.shareGroup = -1;
+            c.ampState.reset();
             c.armed = false;
             c.volume = 1.0f;
             c.monitor = type != ChannelType::Pc;   // la PC ya se oye por Windows
@@ -740,6 +759,16 @@ int Engine::addChannel (ChannelType type)
         if (type == ChannelType::Guitar && guitar < 0)
             selectGuitar (i);
 
+        // Guitarra nueva: viene con el AmpliTube de las otras (compartido, mismo preset para empezar).
+        if (type == ChannelType::Guitar)
+            for (int j = 0; j < maxChannels; ++j)
+                if (j != i && channels[(size_t) j].used && channels[(size_t) j].type == ChannelType::Guitar
+                    && ampliTubeToShare (i, channels[(size_t) j].pluginFile) >= 0)
+                {
+                    shareAmp (i, ampliTubeToShare (i, channels[(size_t) j].pluginFile));
+                    break;
+                }
+
         saveSettings();
         return i;
     }
@@ -751,6 +780,8 @@ void Engine::removeChannel (int index)
 {
     if (index < 0 || index >= maxChannels)
         return;
+
+    unshareAmp (index);
 
     auto& c = channels[(size_t) index];
     std::unique_ptr<juce::AudioPluginInstance> old;
@@ -802,6 +833,18 @@ bool Engine::loadChannelPlugin (int index, const juce::File& file, juce::String&
     if (index < 0 || index >= maxChannels)
         return false;
 
+    // AmpliTube en una guitarra cuando otra ya lo tiene: se comparte (nunca dos copias).
+    if (const int from = ampliTubeToShare (index, file); from >= 0)
+    {
+        shareAmp (index, from);
+        if (index == activeGuitar)
+            takeSharedAmp (index);
+
+        return true;
+    }
+
+    unshareAmp (index);   // otro amplificador: deja de compartir
+
     auto instance = createPlugin (file, error);
     if (instance == nullptr)
     {
@@ -835,6 +878,8 @@ bool Engine::loadChannelPlugin (int index, const juce::File& file, juce::String&
 
 void Engine::clearChannelPlugin (int index)
 {
+    unshareAmp (index);
+
     auto& c = channels[(size_t) index];
     std::unique_ptr<juce::AudioPluginInstance> old;
 
@@ -856,7 +901,8 @@ std::vector<int> Engine::getPendingPlugins() const
     for (int i = 0; i < maxChannels; ++i)
     {
         auto& c = channels[(size_t) i];
-        if (c.used && c.plugin == nullptr && c.pluginFile != juce::File())
+        if (c.used && c.plugin == nullptr && c.pluginFile != juce::File()
+            && (c.shareGroup < 0 || groupLeader (c.shareGroup) == i))
             pending.push_back (i);
     }
 
@@ -866,7 +912,8 @@ std::vector<int> Engine::getPendingPlugins() const
 bool Engine::restoreChannelPlugin (int i)
 {
     auto& c = channels[(size_t) i];
-    if (! c.used || c.plugin != nullptr || c.pluginFile == juce::File())
+    if (! c.used || c.plugin != nullptr || c.pluginFile == juce::File()
+        || (c.shareGroup >= 0 && groupLeader (c.shareGroup) != i))
         return false;
 
     const auto file = c.pluginFile;
@@ -882,11 +929,211 @@ bool Engine::restoreChannelPlugin (int i)
 
     if (hadState)
     {
-        c.plugin->setStateInformation (state.getData(), (int) state.getSize());
+        // Si se compartió (otra guitarra ya tenía AmpliTube), su preset queda guardado aparte.
+        if (c.plugin != nullptr)
+            c.plugin->setStateInformation (state.getData(), (int) state.getSize());
+        else
+            c.ampState = state;
+
         channelStateFile (i).replaceWithData (state.getData(), state.getSize());
     }
 
     return true;
+}
+
+//==============================================================================
+// Amplificador compartido
+
+int Engine::sharedHolder (int group) const
+{
+    for (int i = 0; i < maxChannels; ++i)
+    {
+        auto& c = channels[(size_t) i];
+        if (c.used && c.shareGroup == group && c.plugin != nullptr)
+            return i;
+    }
+
+    return -1;
+}
+
+int Engine::groupLeader (int group) const
+{
+    if (const int holder = sharedHolder (group); holder >= 0)
+        return holder;
+
+    if (const int a = activeGuitar; juce::isPositiveAndBelow (a, maxChannels)
+        && channels[(size_t) a].used && channels[(size_t) a].shareGroup == group)
+        return a;
+
+    for (int i = 0; i < maxChannels; ++i)
+        if (channels[(size_t) i].used && channels[(size_t) i].shareGroup == group)
+            return i;
+
+    return -1;
+}
+
+bool Engine::isSharedWaiting (int index) const
+{
+    auto& c = channels[(size_t) index];
+    return c.used && c.shareGroup >= 0 && c.plugin == nullptr;
+}
+
+// Pasa la copia de una guitarra a otra: guarda el preset de la que la tenía y le
+// carga el de la nueva. Mientras tanto no la procesa nadie (se oye un corte breve).
+void Engine::moveSharedAmp (int from, int to)
+{
+    auto& a = channels[(size_t) from];
+    auto& b = channels[(size_t) to];
+    std::unique_ptr<juce::AudioPluginInstance> amp;
+
+    {
+        const juce::ScopedLock sl (lock);
+        std::swap (amp, a.plugin);
+        sizeChannelBuffer (a);
+    }
+
+    if (amp == nullptr)
+        return;
+
+    amp->getStateInformation (a.ampState);
+    if (b.ampState.getSize() > 0)
+        amp->setStateInformation (b.ampState.getData(), (int) b.ampState.getSize());
+
+    {
+        const juce::ScopedLock sl (lock);
+        std::swap (b.plugin, amp);
+        b.pluginFile = a.pluginFile;
+        b.pluginFailed = false;
+        sizeChannelBuffer (b);
+    }
+
+    log ("amplificador compartido: " + a.name + " -> " + b.name);
+
+    if (onSharedAmpMoved)
+        onSharedAmpMoved (from, to);
+}
+
+void Engine::takeSharedAmp (int index)
+{
+    auto& c = channels[(size_t) index];
+    if (! isSharedWaiting (index))
+        return;
+
+    const int holder = sharedHolder (c.shareGroup);
+    if (holder < 0)
+        return;
+
+    // Una a la vez: la que la tenía deja de sonar (sin amplificador sonaría limpia).
+    auto& h = channels[(size_t) holder];
+    h.armed = h.monitor = false;
+    moveSharedAmp (holder, index);
+    saveSettings();
+}
+
+void Engine::shareAmp (int index, int from)
+{
+    if (index == from || ! juce::isPositiveAndBelow (index, maxChannels) || ! juce::isPositiveAndBelow (from, maxChannels))
+        return;
+
+    auto& f = channels[(size_t) from];
+    if (! f.used || f.type != ChannelType::Guitar || channels[(size_t) index].type != ChannelType::Guitar)
+        return;
+
+    if (f.shareGroup < 0)
+    {
+        if (f.plugin == nullptr)
+            return;
+
+        f.shareGroup = nextShareGroup++;
+    }
+
+    const int group = f.shareGroup;
+    const int holder = sharedHolder (group);
+    if (holder < 0)
+        return;
+
+    // Lo que tenía esta guitarra se descarta (deja su grupo y su amplificador propio).
+    clearChannelPlugin (index);
+
+    auto& c = channels[(size_t) index];
+    c.shareGroup = group;
+    c.pluginFile = channels[(size_t) holder].pluginFile;
+    c.pluginFailed = false;
+    channels[(size_t) holder].plugin->getStateInformation (c.ampState);   // arranca con el mismo preset
+
+    log ("amplificador compartido: " + c.name + " usa el de " + channels[(size_t) holder].name);
+    saveSettings();
+}
+
+int Engine::ampliTubeToShare (int index, const juce::File& file) const
+{
+    if (channels[(size_t) index].type != ChannelType::Guitar || ! file.getFileName().containsIgnoreCase ("AmpliTube"))
+        return -1;
+
+    for (int j = 0; j < maxChannels; ++j)
+    {
+        auto& other = channels[(size_t) j];
+        if (j == index || ! other.used || other.type != ChannelType::Guitar
+            || ! other.pluginFile.getFileName().containsIgnoreCase ("AmpliTube"))
+            continue;
+
+        // Que la copia exista: la tiene esta guitarra o alguna de su grupo.
+        if (other.plugin != nullptr || (other.shareGroup >= 0 && sharedHolder (other.shareGroup) >= 0))
+            return j;
+    }
+
+    return -1;
+}
+
+void Engine::unshareAmp (int index)
+{
+    auto& c = channels[(size_t) index];
+    const int group = c.shareGroup;
+    if (group < 0)
+        return;
+
+    // Si la copia la tiene esta, pasa a otra del grupo.
+    if (c.plugin != nullptr)
+    {
+        for (int i = 0; i < maxChannels; ++i)
+        {
+            if (i != index && channels[(size_t) i].used && channels[(size_t) i].shareGroup == group)
+            {
+                moveSharedAmp (index, i);
+                break;
+            }
+        }
+    }
+
+    c.shareGroup = -1;
+    c.ampState.reset();
+    if (c.plugin == nullptr)
+        c.pluginFile = {};
+
+    // Si quedó una sola guitarra, ya no es un grupo.
+    int count = 0, last = -1;
+    for (int i = 0; i < maxChannels; ++i)
+        if (channels[(size_t) i].used && channels[(size_t) i].shareGroup == group)
+            ++count, last = i;
+
+    if (count == 1)
+    {
+        channels[(size_t) last].shareGroup = -1;
+        channels[(size_t) last].ampState.reset();
+    }
+
+    saveSettings();
+}
+
+juce::StringArray Engine::getActiveAmpliTubes() const
+{
+    juce::StringArray names;
+
+    for (auto& c : channels)
+        if (c.used && (c.monitor || c.armed) && c.plugin != nullptr && c.plugin->getName().containsIgnoreCase ("AmpliTube"))
+            names.add (c.name);
+
+    return names;
 }
 
 void Engine::toggleEntry (int number)
@@ -896,6 +1143,9 @@ void Engine::toggleEntry (int number)
         if (c.used && --number == 0)
         {
             const bool on = ! (c.armed && c.monitor);
+            if (on)
+                takeSharedAmp ((int) (&c - channels.data()));
+
             c.armed = c.monitor = on;
             saveSettings();
             return;
@@ -909,6 +1159,9 @@ void Engine::toggleArm (int number)
     {
         if (c.used && --number == 0)
         {
+            if (! c.armed)
+                takeSharedAmp ((int) (&c - channels.data()));
+
             c.armed = ! c.armed;
             saveSettings();
             return;

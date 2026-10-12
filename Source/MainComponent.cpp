@@ -512,6 +512,7 @@ public:
     {
         std::function<void (int)> openEditor, closeEditor, removed, openTuner;
         std::function<void()> changed;   // devolver el teclado a la ventana principal
+        std::function<void()> refreshAll;   // otras filas cambiaron (amplificador compartido)
         // Muestra "Cargando <plugin>..." y después llama a la función (la carga
         // bloquea la ventana; así se ve qué está pasando).
         std::function<void (const juce::String&, std::function<void()>)> loading;
@@ -534,6 +535,9 @@ public:
         armButton.setTooltip ("Armar: graba esta entrada al pulsar REC");
         armButton.onClick = [this]
         {
+            if (armButton.getToggleState())
+                engine.takeSharedAmp (index);
+
             channel.armed = armButton.getToggleState();
             engine.saveSettings();
         };
@@ -543,6 +547,9 @@ public:
         monitorButton.setTooltip ("Escuchar esta entrada en vivo");
         monitorButton.onClick = [this]
         {
+            if (monitorButton.getToggleState())
+                engine.takeSharedAmp (index);
+
             channel.monitor = monitorButton.getToggleState();
             engine.saveSettings();
         };
@@ -617,7 +624,9 @@ public:
         // Guardado pero sin abrir: esperando su turno al arrancar, o falló (no está instalado...).
         const bool missing = proc == nullptr && channel.pluginFailed;
         const bool pending = proc == nullptr && ! missing && channel.pluginFile != juce::File();
-        pluginButton.setButtonText (proc != nullptr ? proc->getName()
+        const bool shared = engine.isShared (index);
+        pluginButton.setButtonText (shared ? channel.pluginFile.getFileNameWithoutExtension() + " (compartido)"
+                                    : proc != nullptr ? proc->getName()
                                     : missing ? "(no cargo) " + channel.pluginFile.getFileNameWithoutExtension()
                                     : pending ? "Cargando " + channel.pluginFile.getFileNameWithoutExtension() + "..." : none);
         pluginButton.setColour (juce::TextButton::textColourOffId, missing ? recRed.brighter (0.4f) : juce::Colours::white);
@@ -626,7 +635,7 @@ public:
                                  : guitar ? "Amplificador VST3 / VST2 (AmpliTube, Guitar Rig...)" : "Efecto VST3 opcional");
         nameLabel.setTooltip (guitar ? "Clic: usar esta guitarra (Tab cambia). Doble clic: nombre"
                                      : "Doble clic para cambiar el nombre");
-        editButton.setEnabled (proc != nullptr);
+        editButton.setEnabled (proc != nullptr || shared);
 
         refreshSources();
     }
@@ -813,9 +822,36 @@ private:
             menu.addItem (i + 1, plugins[i].getFileNameWithoutExtension() + (plugins[i].hasFileExtension ("dll") ? " (VST2)" : ""),
                           true, plugins[i] == current);
 
+        // Guitarras: usar el amplificador de otra (una sola copia, cada una con su preset).
+        if (channel.type == Engine::ChannelType::Guitar)
+        {
+            juce::PopupMenu share;
+
+            for (int j = 0; j < Engine::maxChannels; ++j)
+            {
+                auto& other = engine.getChannel (j);
+                if (j == index || ! other.used || other.type != Engine::ChannelType::Guitar
+                    || (other.plugin == nullptr && other.shareGroup < 0))
+                    continue;
+
+                const bool same = channel.shareGroup >= 0 && other.shareGroup == channel.shareGroup;
+                share.addItem (2000 + j, "Usar el de " + other.name + " (" + other.pluginFile.getFileNameWithoutExtension()
+                                           + ") con su propio preset", ! same, same);
+            }
+
+            if (channel.shareGroup >= 0)
+                share.addItem (1002, "Dejar de compartir");
+
+            if (share.getNumItems() > 0)
+            {
+                menu.addSeparator();
+                menu.addSubMenu ("Compartir amplificador (un solo AmpliTube)", share);
+            }
+        }
+
         menu.addSeparator();
         menu.addItem (1000, "Otro archivo .vst3...");
-        menu.addItem (1001, "Quitar", channel.plugin != nullptr);
+        menu.addItem (1001, "Quitar", channel.plugin != nullptr || channel.shareGroup >= 0);
 
         juce::Component::SafePointer<ChannelRow> safe (this);
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&pluginButton),
@@ -824,11 +860,17 @@ private:
             if (safe == nullptr || result == 0)
                 return;
 
-            if (result == 1001)
+            if (result == 1001 || result == 1002)
             {
                 safe->callbacks.closeEditor (safe->index);
-                safe->engine.clearChannelPlugin (safe->index);
-                safe->sync (safe->number);
+                safe->engine.clearChannelPlugin (safe->index);   // deja el grupo
+                safe->callbacks.refreshAll();
+            }
+            else if (result >= 2000 && result < 2000 + Engine::maxChannels)
+            {
+                safe->callbacks.closeEditor (safe->index);
+                safe->engine.shareAmp (safe->index, result - 2000);
+                safe->callbacks.refreshAll();
             }
             else if (result == 999)
             {
@@ -873,12 +915,12 @@ private:
             if (! safe->engine.loadChannelPlugin (safe->index, file, error))
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "No se pudo cargar", error);
 
-            safe->sync (safe->number);
+            safe->callbacks.refreshAll();   // si compartía, cambian las otras guitarras del grupo
             safe->callbacks.changed();
         };
 
-        // Las voces y la batería propias son instantáneas: sin aviso.
-        if (file.exists())
+        // Las voces, la batería propias y un AmpliTube compartido son instantáneos: sin aviso.
+        if (file.exists() && engine.ampliTubeToShare (index, file) < 0)
             callbacks.loading (file.getFileNameWithoutExtension(), load);
         else
             load();
@@ -1049,7 +1091,7 @@ MainComponent::MainComponent()
     metroButton.setColour (juce::TextButton::buttonOnColourId, accent);
     waitButton.setColour (juce::TextButton::buttonOnColourId, accent);
     waitButton.setTooltip ("Encendido: REC espera y la toma empieza con la primera nota. "
-                           "Apagado: graba en cuanto pulsas REC");
+                           "Apagado (o con metronomo): graba en cuanto pulsas REC");
     waitButton.onClick = [this] { performAction ("wait"); };
     bpmLabel.setFont (juce::FontOptions (22.0f, juce::Font::bold));
     bpmLabel.setJustificationType (juce::Justification::centred);
@@ -1135,6 +1177,19 @@ MainComponent::MainComponent()
     callbacks.closeEditor = [this] (int i) { closePluginEditor (i); };
     callbacks.removed = [this] (int i) { removeChannel (i); };
     callbacks.openTuner = [this] (int i) { showTuner (i); };
+    callbacks.refreshAll = [this] { refreshChannels(); };
+
+    // La ventana de AmpliTube sigue a la copia compartida cuando cambia de guitarra.
+    engine.onSharedAmpMoved = [this] (int from, int to)
+    {
+        if (editorWindows.count (from) > 0)
+        {
+            editorWindows.erase (from);
+            showPluginEditor (to);
+        }
+
+        refreshPresetTitle();
+    };
     callbacks.changed = [this] { grabKeyboardFocus(); };
     callbacks.loading = [this] (const juce::String& name, std::function<void()> work)
     {
@@ -1272,6 +1327,10 @@ void MainComponent::showAudioSettings()
 
 void MainComponent::showPluginEditor (int channel)
 {
+    // Guitarra que comparte el amplificador: primero se activa (le llega la copia con su preset).
+    if (engine.isSharedWaiting (channel))
+        engine.selectGuitar (channel);
+
     if (auto it = editorWindows.find (channel); it != editorWindows.end())
     {
         it->second->toFront (true);
@@ -1283,6 +1342,7 @@ void MainComponent::showPluginEditor (int channel)
         if (auto* editor = p->createEditorIfNeeded())
         {
             auto title = engine.getChannel (channel).name + " - " + p->getName();
+            engine.logText ("abrir ventana: " + title);
             editorWindows[channel] = std::make_unique<PluginWindow> (title, editor, [this, channel]
             {
                 juce::MessageManager::callAsync ([this, channel] { editorWindows.erase (channel); });
@@ -1323,6 +1383,7 @@ void MainComponent::showTuner (int channel)
     }
 
     tunerWindow = nullptr;
+    engine.logText ("afinador: canal " + juce::String (channel));
     juce::Component::SafePointer<MainComponent> safe (this);
     tunerWindow = std::make_unique<TunerWindow> (engine, channel, [safe]
     {
@@ -1565,6 +1626,30 @@ void MainComponent::changeBpm (float delta)
     looper.setBpm (std::round (looper.getBpm()) + delta);
 }
 
+// Dos AmpliTube procesando a la vez pueden cerrar la app: avisar una vez cada vez que pasa.
+void MainComponent::checkAmpliTubes()
+{
+    const auto active = engine.getActiveAmpliTubes();
+
+    if (active.size() < 2)
+    {
+        ampliTubeWarned = false;
+        return;
+    }
+
+    if (ampliTubeWarned)
+        return;
+
+    ampliTubeWarned = true;
+    engine.logText ("aviso: AmpliTube a la vez en " + active.joinIntoString (", "));
+    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Hay " + juce::String (active.size())
+                                              + " AmpliTube encendidos a la vez",
+        "Estan sonando: " + active.joinIntoString (", ") + ".\n\n"
+        "Dos copias de AmpliTube a la vez pueden cerrar la app. Apaga OIR y el armado de las demas, "
+        "o en las guitarras usa Amplificador > Compartir amplificador para usar un solo AmpliTube "
+        "con un preset por guitarra.");
+}
+
 // Promedio de los últimos toques; si pasan más de 2 s, se empieza de nuevo.
 void MainComponent::tapTempo()
 {
@@ -1634,15 +1719,13 @@ void MainComponent::refreshTransport()
     auto& looper = engine.looper;
 
     const bool recording = looper.isRecording();
-    const bool countIn = looper.isCountingIn();
     const bool waiting = looper.isWaiting();
     recButton.setButtonText (waiting ? "ESPERANDO SONIDO..."
-                           : countIn ? "CUENTA " + juce::String (looper.getCountInBeat()) + " / 4"
                                      : recording ? "TERMINAR TOMA"
                                      : engine.countArmed() == 0 ? "ARMA UNA ENTRADA"
                                      : looper.hasFreeTrack (engine.countArmed()) ? "REC" : "SIN PISTAS");
     recButton.setColour (juce::TextButton::buttonColourId,
-                         recording || countIn ? recRed
+                         recording ? recRed
                          : waiting ? (juce::Time::getMillisecondCounter() % 600 < 300 ? recRed : recRed.withAlpha (0.35f))
                                    : recRed.withAlpha (0.35f));
 
@@ -2169,7 +2252,7 @@ void MainComponent::refreshDawLights()
     }
 
     wanted[16] = looper.isPlaying() ? 127 : 0;
-    wanted[17] = looper.isRecording() || looper.isWaiting() || looper.isCountingIn() ? 127 : 0;
+    wanted[17] = looper.isRecording() || looper.isWaiting() ? 127 : 0;
 
     for (size_t i = 0; i < wanted.size(); ++i)
     {
@@ -2243,6 +2326,7 @@ void MainComponent::timerCallback()
     refreshTransport();
     refreshTracks();
     refreshDawLights();
+    checkAmpliTubes();
     repaint (inMeter.getUnion (outMeter).getUnion (loopBar).expanded (2));
 }
 

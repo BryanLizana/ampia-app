@@ -169,6 +169,7 @@ void VoiceTracks::render (int slot)
         return;
 
     e.rendering = true;
+    engine.logText ("voz de la pista " + juce::String (slot) + ": reprocesando");
     const int order = e.order, style = e.voice->styleIndex;
     const auto knobs = e.voice->getKnobValues();
     const double sr = looper.getSampleRate();

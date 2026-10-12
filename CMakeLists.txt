@@ -30,6 +30,7 @@ target_sources(AmpBox PRIVATE
     Source/VoiceChain.cpp
     Source/VoiceTracks.cpp
     Source/Tuner.cpp
+    Source/Crash.cpp
     Source/MainComponent.cpp)
 
 target_compile_definitions(AmpBox PRIVATE
@@ -57,6 +58,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst2sdk/pluginterfaces/vst2.x/aeffect.h")
     message(STATUS "AmpBox: VST2 activado")
 else()
     message(STATUS "AmpBox: sin vst2sdk/ -> solo plugins VST3")
+endif()
+
+# Símbolos (.pdb) también en Release: si se cae, la pila del log dice dónde.
+if(MSVC)
+    target_compile_options(AmpBox PRIVATE /Zi)
+    target_link_options(AmpBox PRIVATE /DEBUG /OPT:REF /OPT:ICF)
 endif()
 
 target_link_libraries(AmpBox

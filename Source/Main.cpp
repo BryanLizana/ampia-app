@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "Crash.h"
 
 class AmpBoxApplication : public juce::JUCEApplication
 {
@@ -7,7 +8,11 @@ public:
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
     bool moreThanOneInstanceAllowed() override           { return false; }
 
-    void initialise (const juce::String&) override { mainWindow = std::make_unique<MainWindow> (getApplicationName()); }
+    void initialise (const juce::String&) override
+    {
+        installCrashHandler();
+        mainWindow = std::make_unique<MainWindow> (getApplicationName());
+    }
     void shutdown() override                       { mainWindow = nullptr; }
     void systemRequestedQuit() override            { quit(); }
 

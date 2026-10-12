@@ -42,6 +42,8 @@ private:
     void performAction (const juce::String& id);
     void changeBpm (float delta);
     void tapTempo();
+    void checkAmpliTubes();
+    bool ampliTubeWarned = false;
     void seekTo (const juce::MouseEvent&);
     void refreshHelp();
     void pickPreset (const juce::String& path);

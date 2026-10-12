@@ -38,7 +38,7 @@ void Looper::prepare (double newSampleRate, int maxBlockSize)
 
     loopLength = 0;
     position = 0;
-    playing = recording = countingIn = false;
+    playing = recording = false;
     numRecording = 0;
 }
 
@@ -122,7 +122,7 @@ void Looper::seek (double fraction)
 
 bool Looper::isTempoLocked() const
 {
-    if (recording || countingIn)
+    if (recording)
         return true;
 
     for (auto& t : tracks)
@@ -134,7 +134,7 @@ bool Looper::isTempoLocked() const
 
 void Looper::undo()
 {
-    if (recording || countingIn || waiting)
+    if (recording || waiting)
     {
         cancelRequest = true;
         return;
@@ -173,7 +173,7 @@ void Looper::deleteTrack (int index)
 
 void Looper::clearAll()
 {
-    if (recording || countingIn || waiting)
+    if (recording || waiting)
         cancelRequest = true;
 
     for (auto& t : tracks)
@@ -314,9 +314,9 @@ bool Looper::render (int only, juce::AudioBuffer<float>& out, int loops)
 
 void Looper::requestRecord (const Source* sources, int numSources)
 {
-    if (countingIn || waiting)
+    if (waiting)
     {
-        countingIn = waiting = false; // segunda pulsación durante la cuenta o la espera: cancelar
+        waiting = false; // segunda pulsación durante la espera: cancelar
         return;
     }
 
@@ -349,18 +349,9 @@ void Looper::requestRecord (const Source* sources, int numSources)
         position = 0;
     }
 
-    // Desde parado y con metrónomo: un compás de cuenta antes de grabar
-    // (el click ya marca cuándo empezar).
-    if (metronomeOn && ! playing)
-    {
-        countInPos = 0;
-        countInBeat = 1;
-        countingIn = true;
-        return;
-    }
-
-    // Si no, REC al tocar: esperar el primer sonido (ver process).
-    if (waitForSound)
+    // REC al tocar: esperar el primer sonido (ver process). Con metrónomo no: la toma
+    // empieza al apretar REC y el click arranca ahí (desde parado, en el tiempo 1).
+    if (waitForSound && ! metronomeOn)
     {
         waiting = true;
         return;
@@ -591,14 +582,14 @@ void Looper::process (const Source* sources, int numSources, float* left, float*
 
     if (cancelRequest.exchange (false))
     {
-        countingIn = waiting = false;
+        waiting = false;
         if (numRecording > 0)
             cancelRecording();
     }
 
     if (playRequest.exchange (false))
     {
-        countingIn = waiting = false;
+        waiting = false;
 
         if (numRecording > 0)
             stopRecording();
@@ -609,7 +600,7 @@ void Looper::process (const Source* sources, int numSources, float* left, float*
 
     // Ir a otra parte del loop (clic en la barra). Grabando no: la toma va en círculo.
     const double seekTo = seekRequest.exchange (-1.0);
-    if (seekTo >= 0.0 && loopLength > 0 && numRecording == 0 && ! countingIn)
+    if (seekTo >= 0.0 && loopLength > 0 && numRecording == 0)
     {
         position = juce::jlimit ((juce::int64) 0, (juce::int64) loopLength - 1,
                                  (juce::int64) (seekTo * loopLength));
@@ -646,23 +637,6 @@ void Looper::process (const Source* sources, int numSources, float* left, float*
                 break;
             }
         }
-    }
-
-    // Cuenta previa: solo click, sin avanzar el loop.
-    if (countingIn)
-    {
-        const auto countInLen = (juce::int64) std::llround (samplesPerBeat() * beatsPerBar);
-        addClick (left, right, numSamples, countInPos, 0);
-        countInPos += numSamples;
-        countInBeat = (int) juce::jmin ((juce::int64) beatsPerBar, (juce::int64) (countInPos / samplesPerBeat()) + 1);
-
-        if (countInPos >= countInLen)
-        {
-            countingIn = false;
-            startRecording (sources, numSources); // empieza en el bloque siguiente
-        }
-
-        return;
     }
 
     const juce::int64 pos = position;
