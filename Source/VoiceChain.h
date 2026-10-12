@@ -2,9 +2,10 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 // Cadenas de voz para cantar en vivo (sin latencia):
-//   EQ -> Compresor -> Compresor -> Saturador -> Delay al tempo -> Reverb
+//   Anti-ruido -> EQ -> Compresor -> Compresor -> Saturador -> Delay al tempo -> Reverb
 // Estilos: Chester (cadena tipo rack de Ableton), Cobain y Natural.
-// Perillas: entrada, compresión, saturación, delay, reverb y salida.
+// Perillas con nombres simples: anti-ruido, cuerpo, brillo, pegada, crudeza, eco,
+// ambiente, entrada y volumen.
 class VoiceChain : public juce::AudioPluginInstance
 {
 public:
@@ -62,28 +63,38 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
-    // Perillas (AudioPluginInstance no admite parámetros propios).
+    // Perillas (AudioPluginInstance no admite parámetros propios). Se guardan por id:
+    // el orden es el de la ventana.
     struct Knob
     {
         const char* id;
         const char* name;
+        const char* help;       // qué hace, en palabras simples
         float min, max, defaultValue;
         const char* suffix;
         std::atomic<float> value;
     };
 
-    enum { inGain, compAmount, satMix, delayMix, reverbMix, outGain, numKnobs };
+    enum { gate, body, bright, compAmount, satMix, delayMix, reverbMix, inGain, outGain, numKnobs };
     std::array<Knob, numKnobs> knobs
     {{
-        { "in",     "Entrada",    -12.0f,  12.0f,   0.0f, " dB", { 0.0f } },
-        { "comp",   "Compresion",   0.0f, 150.0f, 100.0f, " %",  { 100.0f } },
-        { "sat",    "Saturacion",   0.0f, 100.0f,  60.0f, " %",  { 60.0f } },
-        { "delay",  "Delay",        0.0f, 100.0f,  11.5f, " %",  { 11.5f } },
-        { "reverb", "Reverb",       0.0f, 100.0f,  15.0f, " %",  { 15.0f } },
-        { "out",    "Salida",     -24.0f,  12.0f,   0.0f, " dB", { 0.0f } },
+        { "gate",   "Anti-ruido", "Calla el ruido de fondo cuando no cantas", 0.0f, 100.0f,   0.0f, " %",  { 0.0f } },
+        { "body",   "Cuerpo",   "Graves: voz mas gruesa o mas fina",      -12.0f,  12.0f,   0.0f, " dB", { 0.0f } },
+        { "bright", "Brillo",   "Agudos: voz mas clara o mas opaca",      -12.0f,  12.0f,   0.0f, " dB", { 0.0f } },
+        { "comp",   "Pegada",   "Voz pareja y adelante (compresion)",       0.0f, 150.0f, 100.0f, " %",  { 100.0f } },
+        { "sat",    "Crudeza",  "Grano y suciedad (saturacion)",            0.0f, 100.0f,  60.0f, " %",  { 60.0f } },
+        { "delay",  "Eco",      "Repeticiones al tempo (delay)",            0.0f, 100.0f,  11.5f, " %",  { 11.5f } },
+        { "reverb", "Ambiente", "Sala, espacio (reverb)",                   0.0f, 100.0f,  15.0f, " %",  { 15.0f } },
+        { "in",     "Entrada",  "Mas = mas pegada y crudeza",             -12.0f,  12.0f,   0.0f, " dB", { 0.0f } },
+        { "out",    "Volumen",  "Volumen final de la voz",                -24.0f,  12.0f,   0.0f, " dB", { 0.0f } },
     }};
 
     float get (int knob) const { return knobs[(size_t) knob].value.load(); }
+
+    // Copia estilo-independiente de las perillas (para pistas de voz re-editables).
+    using KnobValues = std::array<float, numKnobs>;
+    KnobValues getKnobValues() const;
+    void setKnobValues (const KnobValues&);
 
     const int styleIndex;
     const Style& style;
@@ -98,6 +109,12 @@ private:
     };
 
     void updateFilters();
+    float appliedBody = 0.0f, appliedBright = 0.0f;
+
+    // Puerta de ruido: sigue el nivel y baja la voz cuando queda bajo el umbral.
+    float gateEnv = 0.0f, gateGain = 1.0f, gateOpen = 0.0f, gateClose = 0.0f, gateFollow = 0.0f;
+    int gateHold = 0, gateHoldLen = 0;
+    void processGate (float* L, float* R, int n);   // cuerpo y brillo con los que están los filtros
 
     double sr = 48000.0;
     std::array<juce::IIRFilter, 2> highpass, lowShelf, mid, highShelf, delayFilter;

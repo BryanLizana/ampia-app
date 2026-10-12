@@ -110,17 +110,36 @@ float VoiceChain::Compressor::gainFor (float level)
     return juce::Decibels::decibelsToGain (makeupDb - reduction);
 }
 
+VoiceChain::KnobValues VoiceChain::getKnobValues() const
+{
+    KnobValues values {};
+    for (size_t i = 0; i < knobs.size(); ++i)
+        values[i] = knobs[i].value.load();
+
+    return values;
+}
+
+void VoiceChain::setKnobValues (const KnobValues& values)
+{
+    for (size_t i = 0; i < knobs.size(); ++i)
+        knobs[i].value = juce::jlimit (knobs[i].min, knobs[i].max, values[i]);
+}
+
 void VoiceChain::updateFilters()
 {
     using C = juce::IIRCoefficients;
+
+    // Cuerpo y brillo suben o bajan los estantes de graves y agudos del estilo.
+    appliedBody = get (body);
+    appliedBright = get (bright);
 
     for (int ch = 0; ch < 2; ++ch)
     {
         const auto db = [] (double v) { return (float) juce::Decibels::decibelsToGain (v); };
         highpass[(size_t) ch].setCoefficients (C::makeHighPass (sr, style.highpassHz));
-        lowShelf[(size_t) ch].setCoefficients (C::makeLowShelf (sr, style.lowShelfHz, 0.7, db (style.lowShelfDb)));
+        lowShelf[(size_t) ch].setCoefficients (C::makeLowShelf (sr, style.lowShelfHz, 0.7, db (style.lowShelfDb + appliedBody)));
         mid[(size_t) ch].setCoefficients (C::makePeakFilter (sr, style.midHz, style.midQ, db (style.midDb)));
-        highShelf[(size_t) ch].setCoefficients (C::makeHighShelf (sr, style.highShelfHz, 0.7, db (style.highShelfDb)));
+        highShelf[(size_t) ch].setCoefficients (C::makeHighShelf (sr, style.highShelfHz, 0.7, db (style.highShelfDb + appliedBright)));
         delayFilter[(size_t) ch].setCoefficients (C::makeBandPass (sr, style.delayFilterHz, 0.35));
     }
 }
@@ -137,6 +156,14 @@ void VoiceChain::prepareToPlay (double sampleRate, int maxBlockSize)
     comp1.setTimes (sr, style.comp1AttackMs, style.comp1ReleaseMs);
     comp2.setTimes (sr, style.comp2AttackMs, style.comp2ReleaseMs);
     comp1.env = comp2.env = 0.0f;
+
+    gateOpen = 1.0f - (float) std::exp (-1.0 / (0.001 * sr));    // abre en ~1 ms (no se come el ataque)
+    gateClose = 1.0f - (float) std::exp (-1.0 / (0.08 * sr));    // cierra en ~80 ms (sin cortes bruscos)
+    gateFollow = (float) std::exp (-1.0 / (0.01 * sr));
+    gateHoldLen = (int) (0.06 * sr);                             // espera 60 ms antes de cerrar (entre palabras)
+    gateEnv = 0.0f;
+    gateGain = 1.0f;
+    gateHold = 0;
 
     delayLine.setSize (2, (int) (2.5 * sr));
     delayLine.clear();
@@ -156,6 +183,43 @@ void VoiceChain::prepareToPlay (double sampleRate, int maxBlockSize)
     reverb.reset();
 }
 
+// 0 % = apagada; 100 % = umbral en -30 dB. Cerrada baja ~30 dB (no silencio total:
+// suena más natural). Mientras cantas el ruido sigue, pero la voz lo tapa.
+void VoiceChain::processGate (float* L, float* R, int n)
+{
+    const float amount = get (gate) / 100.0f;
+    if (amount <= 0.0f)
+    {
+        gateGain = 1.0f;
+        return;
+    }
+
+    const float threshold = juce::Decibels::decibelsToGain (-70.0f + 40.0f * amount);
+    constexpr float floorGain = 0.03f;
+
+    for (int i = 0; i < n; ++i)
+    {
+        const float level = juce::jmax (std::abs (L[i]), std::abs (R[i]));
+        gateEnv = level > gateEnv ? level : gateEnv * gateFollow;
+
+        float target = floorGain;
+        if (gateEnv > threshold)
+        {
+            gateHold = gateHoldLen;
+            target = 1.0f;
+        }
+        else if (gateHold > 0)
+        {
+            --gateHold;
+            target = 1.0f;
+        }
+
+        gateGain += (target - gateGain) * (target > gateGain ? gateOpen : gateClose);
+        L[i] *= gateGain;
+        R[i] *= gateGain;
+    }
+}
+
 void VoiceChain::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     const int n = buffer.getNumSamples();
@@ -166,6 +230,12 @@ void VoiceChain::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     auto* R = buffer.getWritePointer (1);
 
     buffer.applyGain (juce::Decibels::decibelsToGain (get (inGain)));
+
+    if (get (body) != appliedBody || get (bright) != appliedBright)
+        updateFilters();
+
+    // 0) Anti-ruido (antes de comprimir: la compresión subiría el ruido).
+    processGate (L, R, n);
 
     // 1) Channel EQ
     for (int ch = 0; ch < 2; ++ch)
@@ -277,7 +347,8 @@ void VoiceChain::setStateInformation (const void* data, int size)
 }
 
 //==============================================================================
-// Ventana: seis perillas y "Valores del estilo" para volver a los de fábrica.
+// Ventana: nueve perillas (con qué hace cada una) y "Valores del estilo" para volver
+// a los de fábrica.
 
 namespace
 {
@@ -300,7 +371,15 @@ namespace
 
                 auto* l = labels.add (new juce::Label ({}, k.name));
                 l->setJustificationType (juce::Justification::centred);
+                l->setFont (juce::FontOptions (14.0f, juce::Font::bold));
                 addAndMakeVisible (l);
+
+                auto* help = helps.add (new juce::Label ({}, k.help));
+                help->setJustificationType (juce::Justification::centredTop);
+                help->setFont (juce::FontOptions (11.0f));
+                help->setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
+                help->setMinimumHorizontalScale (1.0f);
+                addAndMakeVisible (help);
             }
 
             resetButton.onClick = [this]
@@ -310,7 +389,7 @@ namespace
             };
             addAndMakeVisible (resetButton);
 
-            setSize (480, 300);
+            setSize (700, 400);
         }
 
         void paint (juce::Graphics& g) override
@@ -333,12 +412,13 @@ namespace
             resetButton.setBounds (r.removeFromBottom (28).removeFromRight (160));
             r.removeFromBottom (8);
 
-            const int w = r.getWidth() / 3, h = r.getHeight() / 2;
+            const int perRow = (sliders.size() + 1) / 2, w = r.getWidth() / perRow, h = r.getHeight() / 2;
 
             for (int i = 0; i < sliders.size(); ++i)
             {
-                auto cell = juce::Rectangle<int> (r.getX() + (i % 3) * w, r.getY() + (i / 3) * h, w, h).reduced (4);
+                auto cell = juce::Rectangle<int> (r.getX() + (i % perRow) * w, r.getY() + (i / perRow) * h, w, h).reduced (4);
                 labels[i]->setBounds (cell.removeFromTop (18));
+                helps[i]->setBounds (cell.removeFromBottom (30));
                 sliders[i]->setBounds (cell);
             }
         }
@@ -346,7 +426,7 @@ namespace
     private:
         VoiceChain& voice;
         juce::OwnedArray<juce::Slider> sliders;
-        juce::OwnedArray<juce::Label> labels;
+        juce::OwnedArray<juce::Label> labels, helps;
         juce::TextButton resetButton { "Valores del estilo" };
     };
 }

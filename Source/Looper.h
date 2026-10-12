@@ -9,7 +9,11 @@
 // Las tomas siguientes duran lo mismo que el loop base: si se sigue
 // grabando al pasar el final, se vuelve al inicio y se graba encima.
 // Con el metrónomo activo hay un compás de cuenta antes de grabar desde
-// parado, y la toma base se ajusta a compases enteros.
+// parado, y la toma base se ajusta a compases enteros. Sin metrónomo el
+// largo es libre y el tempo se ajusta al loop (como el Looper de Ableton).
+// Con loop, el click sale de la posición dentro del loop: nunca se corre.
+// Las fuentes de voz se graban también sin efecto (dry), para poder cambiar la
+// voz después (ver VoiceTracks).
 //
 // Hilos: process() corre en el hilo de audio y nunca reserva memoria.
 // maintain() corre en el hilo de mensajes y prepara los buffers libres.
@@ -40,6 +44,8 @@ public:
     {
         std::atomic<State> state { State::Empty };
         juce::AudioBuffer<float> buffer;    // estéreo, capacidad fija
+        juce::AudioBuffer<float> dry;       // mono: la entrada sin efecto (misma capacidad)
+        std::atomic<bool> hasDry { false }; // se grabó también la señal limpia
         int length = 0;                     // muestras (la base puede ser de varios compases)
         int order = 0;                      // orden de grabación (para deshacer); igual en toda la toma
         int source = 0;                     // fuente de la que se grabó
@@ -57,6 +63,7 @@ public:
         bool armed = false;
         bool onset = false;   // en este bloque empezó a sonar (nota MIDI o señal fuerte)
         float volume = 1.0f;  // volumen de la entrada: se aplica al reproducir, no a lo grabado
+        const float* dry = nullptr;   // voz: la entrada sin efecto, alineada con left/right
     };
 
     // Hilo de mensajes
@@ -64,6 +71,7 @@ public:
     void maintain (int wantedReady);   // deja listos tantos buffers como fuentes armadas
     void toggleRecord() { recRequest = true; }
     void togglePlay()   { playRequest = true; }
+    void seek (double fraction);       // ir a esa parte del loop (0..1); desde parado, arranca
     void undo();
     void redo();
     void deleteTrack (int index);
@@ -106,8 +114,15 @@ public:
 
     int getLoopLength() const      { return loopLength; }
 
+    // Voz re-editable: copia la señal limpia de una pista terminada (o deshecha).
+    bool copyDry (int index, juce::AudioBuffer<float>& out) const;
+    // Reemplaza el audio de esa pista (estéreo, largo del loop) si sigue siendo la misma toma.
+    bool replaceAudio (int index, int order, const juce::AudioBuffer<float>& audio);
+
     // Mezcla de las pistas (volumen, paneo, mute) repetida "loops" veces.
-    bool renderMix (juce::AudioBuffer<float>& out, int loops);
+    bool renderMix (juce::AudioBuffer<float>& out, int loops)              { return render (-1, out, loops); }
+    // Una sola pista, igual que suena en la mezcla. false si no suena.
+    bool renderTrack (int index, juce::AudioBuffer<float>& out, int loops) { return render (index, out, loops); }
 
     // Hilo de audio: graba las fuentes armadas y suma los loops y el click
     // a la salida (que ya trae lo que se está monitoreando).
@@ -118,13 +133,18 @@ private:
     bool startRecording (const Source* sources, int numSources);   // false si no hay pistas libres
     void stopRecording();
     void cancelRecording();
-    void addClick (float* left, float* right, int numSamples, juce::int64 startPos);
+    bool render (int only, juce::AudioBuffer<float>& out, int loops);
+    void fitTempo (int length);
+    // wrap > 0: posición dentro del loop de ese largo (el pulso sale del loop).
+    void addClick (float* left, float* right, int numSamples, juce::int64 startPos, int wrap);
+    static void sizeBuffers (Track&, int size);
     double samplesPerBeat() const  { return sampleRate * 60.0 / bpm; }
 
     std::array<Track, maxTracks> tracks;
     juce::CriticalSection allocLock;
 
     std::atomic<bool> recRequest { false }, playRequest { false }, cancelRequest { false };
+    std::atomic<double> seekRequest { -1.0 };   // -1 = ninguno
     std::atomic<bool> playing { false }, recording { false }, countingIn { false };
     std::atomic<bool> metronomeOn { false }, waitForSound { true }, waiting { false };
     std::atomic<float> bpm { 100.0f };

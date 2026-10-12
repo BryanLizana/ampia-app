@@ -28,6 +28,8 @@ target_sources(AmpBox PRIVATE
     Source/DrumKit.cpp
     Source/PcAudio.cpp
     Source/VoiceChain.cpp
+    Source/VoiceTracks.cpp
+    Source/Tuner.cpp
     Source/MainComponent.cpp)
 
 target_compile_definitions(AmpBox PRIVATE

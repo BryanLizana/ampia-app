@@ -32,6 +32,7 @@ void Looper::prepare (double newSampleRate, int maxBlockSize)
     for (auto& t : tracks)
     {
         t.buffer.setSize (0, 0);
+        t.dry.setSize (0, 0);
         t.state = State::Empty;
     }
 
@@ -39,6 +40,18 @@ void Looper::prepare (double newSampleRate, int maxBlockSize)
     position = 0;
     playing = recording = countingIn = false;
     numRecording = 0;
+}
+
+void Looper::sizeBuffers (Track& t, int size)
+{
+    if (t.buffer.getNumSamples() != size)
+    {
+        t.buffer.setSize (2, size);   // achicar libera la memoria
+        t.dry.setSize (1, size);
+    }
+
+    t.buffer.clear();
+    t.dry.clear();
 }
 
 void Looper::maintain (int wantedReady)
@@ -59,10 +72,7 @@ void Looper::maintain (int wantedReady)
         if (swapState (t.state, State::Dirty, State::Loading)
             || (t.buffer.getNumSamples() != target && swapState (t.state, State::Ready, State::Loading)))
         {
-            if (t.buffer.getNumSamples() != target)
-                t.buffer.setSize (2, target);   // achicar libera la memoria
-
-            t.buffer.clear();
+            sizeBuffers (t, target);
             t.state = State::Ready;
         }
 
@@ -78,8 +88,7 @@ void Looper::maintain (int wantedReady)
 
         if (t.state == State::Empty)
         {
-            t.buffer.setSize (2, target);
-            t.buffer.clear();
+            sizeBuffers (t, target);
             t.state = State::Ready;
             ++ready;
         }
@@ -103,6 +112,12 @@ void Looper::setBpm (float newBpm)
     // Con un loop grabado el tempo queda fijo (si no, el click se desfasa).
     if (! isTempoLocked())
         bpm = juce::jlimit (minBpm, maxBpm, newBpm);
+}
+
+void Looper::seek (double fraction)
+{
+    if (loopLength > 0)
+        seekRequest = juce::jlimit (0.0, 1.0, fraction);
 }
 
 bool Looper::isTempoLocked() const
@@ -191,6 +206,36 @@ bool Looper::copyTrack (int index, juce::AudioBuffer<float>& out) const
     return true;
 }
 
+bool Looper::copyDry (int index, juce::AudioBuffer<float>& out) const
+{
+    auto& t = tracks[(size_t) index];
+    const int len = loopLength;
+    const auto state = t.state.load();
+
+    if ((state != State::Playing && state != State::Undone) || ! t.hasDry || len <= 0 || t.length != len)
+        return false;
+
+    out.setSize (1, len);
+    out.copyFrom (0, 0, t.dry, 0, 0, len);
+    return true;
+}
+
+bool Looper::replaceAudio (int index, int order, const juce::AudioBuffer<float>& audio)
+{
+    auto& t = tracks[(size_t) index];
+    const int len = loopLength;
+    const auto state = t.state.load();
+
+    // Hilo de mensajes, como maintain(): una pista sonando no cambia de tamaño mientras se copia.
+    if ((state != State::Playing && state != State::Undone) || t.order != order
+        || len <= 0 || t.length != len || audio.getNumSamples() < len)
+        return false;
+
+    t.buffer.copyFrom (0, 0, audio, 0, 0, len);
+    t.buffer.copyFrom (1, 0, audio, juce::jmin (1, audio.getNumChannels() - 1), 0, len);
+    return true;
+}
+
 int Looper::addTrack (const juce::AudioBuffer<float>& audio, int source, int stem, int expectedLength)
 {
     const int len = loopLength;
@@ -213,6 +258,7 @@ int Looper::addTrack (const juce::AudioBuffer<float>& audio, int source, int ste
         t.order = nextOrder++;
         t.source = source;
         t.stem = stem;
+        t.hasDry = false;
         t.gain = 1.0f;
         t.pan = 0.0f;
         t.mute = false;
@@ -223,21 +269,30 @@ int Looper::addTrack (const juce::AudioBuffer<float>& audio, int source, int ste
     return -1;
 }
 
-bool Looper::renderMix (juce::AudioBuffer<float>& out, int loops)
+bool Looper::render (int only, juce::AudioBuffer<float>& out, int loops)
 {
     const int len = loopLength;
     if (len <= 0 || loops <= 0)
         return false;
+
+    if (only >= 0)
+    {
+        auto& t = tracks[(size_t) only];
+        if (t.state != State::Playing || t.mute || t.length != len)
+            return false;
+    }
 
     // Como mucho 5 min de MP3 (un loop largo con muchas vueltas no entra en memoria).
     loops = juce::jlimit (1, loops, juce::jmax (1, capacity / len));
     out.setSize (2, len * loops);
     out.clear();
 
-    for (auto& t : tracks)
+    for (int i = 0; i < maxTracks; ++i)
     {
+        auto& t = tracks[(size_t) i];
+
         // Solo pistas terminadas: su buffer ya no se escribe.
-        if (t.state != State::Playing || t.mute || t.length != len)
+        if ((only >= 0 && i != only) || t.state != State::Playing || t.mute || t.length != len)
             continue;
 
         const float gain = t.gain * sourceVolume[(size_t) t.source].load(), pan = t.pan;
@@ -375,6 +430,7 @@ bool Looper::startRecording (const Source* sources, int numSources)
         t.order = order;
         t.source = s;
         t.stem = None;
+        t.hasDry = sources[s].dry != nullptr;
         t.gain = 1.0f;
         t.pan = 0.0f;
         t.mute = false;
@@ -446,14 +502,39 @@ void Looper::stopRecording()
 
         // Lo que se pasó del último ciclo se suma al principio.
         if (written > trackLen)
+        {
             for (int ch = 0; ch < 2; ++ch)
                 t.buffer.addFrom (ch, 0, t.buffer, ch, trackLen, juce::jmin (written - trackLen, trackLen));
+
+            t.dry.addFrom (0, 0, t.dry, 0, trackLen, juce::jmin (written - trackLen, trackLen));
+        }
 
         t.length = trackLen;
         t.state = State::Playing;
     }
 
     loopLength = trackLen;
+
+    if (! metronomeOn)
+        fitTempo (trackLen);
+}
+
+// Toma base sin metrónomo: el tempo pasa a ser el más cercano al actual con el que
+// el loop dura compases enteros. Así el click y las marcas de compás caen justo
+// si después se prende el metrónomo (como "Set Song Tempo" del Looper de Ableton).
+void Looper::fitTempo (int length)
+{
+    const double barLen = samplesPerBeat() * beatsPerBar;
+    const auto tempoFor = [this, length] (int bars) { return 60.0 * beatsPerBar * bars * sampleRate / length; };
+    int bars = juce::jmax (1, juce::roundToInt (length / barLen));
+
+    while (bars > 1 && tempoFor (bars) > maxBpm)
+        --bars;
+
+    while (tempoFor (bars) < minBpm)
+        ++bars;
+
+    bpm = (float) juce::jlimit ((double) minBpm, (double) maxBpm, tempoFor (bars));
 }
 
 void Looper::cancelRecording()
@@ -471,14 +552,19 @@ void Looper::cancelRecording()
     }
 }
 
-void Looper::addClick (float* left, float* right, int numSamples, juce::int64 startPos)
+void Looper::addClick (float* left, float* right, int numSamples, juce::int64 startPos, int wrap)
 {
-    const double beatLen = samplesPerBeat();
+    // Con loop, el pulso es el loop dividido en pulsos enteros: si el tempo tiene
+    // decimales, el click no se va corriendo vuelta a vuelta.
+    double beatLen = samplesPerBeat();
+    if (wrap > 0)
+        beatLen = (double) wrap / juce::jmax (1, juce::roundToInt (wrap / beatLen));
+
     const double clickLen = 0.03 * sampleRate;
 
     for (int i = 0; i < numSamples; ++i)
     {
-        const double p = (double) (startPos + i);
+        const double p = (double) (wrap > 0 ? positiveMod (startPos + i, wrap) : startPos + i);
         const double inBeat = std::fmod (p, beatLen);
 
         if (inBeat >= clickLen)
@@ -521,6 +607,15 @@ void Looper::process (const Source* sources, int numSources, float* left, float*
         position = 0;
     }
 
+    // Ir a otra parte del loop (clic en la barra). Grabando no: la toma va en círculo.
+    const double seekTo = seekRequest.exchange (-1.0);
+    if (seekTo >= 0.0 && loopLength > 0 && numRecording == 0 && ! countingIn)
+    {
+        position = juce::jlimit ((juce::int64) 0, (juce::int64) loopLength - 1,
+                                 (juce::int64) (seekTo * loopLength));
+        playing = true;
+    }
+
     bool anyLoop = numRecording > 0;
 
     for (auto& t : tracks)
@@ -557,7 +652,7 @@ void Looper::process (const Source* sources, int numSources, float* left, float*
     if (countingIn)
     {
         const auto countInLen = (juce::int64) std::llround (samplesPerBeat() * beatsPerBar);
-        addClick (left, right, numSamples, countInPos);
+        addClick (left, right, numSamples, countInPos, 0);
         countInPos += numSamples;
         countInBeat = (int) juce::jmin ((juce::int64) beatsPerBar, (juce::int64) (countInPos / samplesPerBeat()) + 1);
 
@@ -628,6 +723,7 @@ void Looper::process (const Source* sources, int numSources, float* left, float*
 
             const float* inL = sources[t.source].left;
             const float* inR = sources[t.source].right != nullptr ? sources[t.source].right : inL;
+            const float* inDry = t.hasDry ? sources[t.source].dry : nullptr;
 
             if (len > 0)
             {
@@ -640,6 +736,8 @@ void Looper::process (const Source* sources, int numSources, float* left, float*
                     const int n = juce::jmin (numSamples - done, len - idx);
                     juce::FloatVectorOperations::add (t.buffer.getWritePointer (0, idx), inL + done, n);
                     juce::FloatVectorOperations::add (t.buffer.getWritePointer (1, idx), inR + done, n);
+                    if (inDry != nullptr)
+                        juce::FloatVectorOperations::add (t.dry.getWritePointer (0, idx), inDry + done, n);
                     done += n;
                     idx = (idx + n) % len;
                 }
@@ -656,6 +754,8 @@ void Looper::process (const Source* sources, int numSources, float* left, float*
                 {
                     t.buffer.copyFrom (0, start, inL + skip, n);
                     t.buffer.copyFrom (1, start, inR + skip, n);
+                    if (inDry != nullptr)
+                        t.dry.copyFrom (0, start, inDry + skip, n);
                 }
 
                 full = full || n < numSamples - skip;
@@ -676,7 +776,7 @@ void Looper::process (const Source* sources, int numSources, float* left, float*
         // Parado con el metrónomo prendido: el click suena igual, para practicar o tomar el tempo.
         if (metronomeOn)
         {
-            addClick (left, right, numSamples, freeClickPos);
+            addClick (left, right, numSamples, freeClickPos, 0);
             freeClickPos += numSamples;
         }
         else
@@ -689,7 +789,7 @@ void Looper::process (const Source* sources, int numSources, float* left, float*
 
     // 3) Click del metrónomo (no se graba).
     if (metronomeOn)
-        addClick (left, right, numSamples, pos);
+        addClick (left, right, numSamples, pos, len);
 
     position = pos + numSamples;
 }

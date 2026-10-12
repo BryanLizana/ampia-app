@@ -23,3 +23,6 @@ __pycache__/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Notas personales (no se suben)
+notas/

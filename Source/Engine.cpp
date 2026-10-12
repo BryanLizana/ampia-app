@@ -65,6 +65,7 @@ const std::vector<Engine::KeyAction>& Engine::getKeyActions()
         { "undo",      "Deshacer",               KP (KP::leftKey) },
         { "redo",      "Rehacer",                KP (KP::rightKey) },
         { "metro",     "Metronomo on/off",       KP ('m') },
+        { "tap",       "Tap tempo",              KP ('t') },
         { "tempoUp",   "Tempo +1",               KP (KP::upKey) },
         { "tempoDown", "Tempo -1",               KP (KP::downKey) },
         { "clear",     "Borrar todo",            KP (KP::deleteKey) },
@@ -1020,6 +1021,16 @@ void Engine::audioDeviceStopped()
             c.plugin->releaseResources();
 }
 
+int Engine::readTuner (float* dest, int maxSamples)
+{
+    int start1, size1, start2, size2;
+    tunerFifo.prepareToRead (maxSamples, start1, size1, start2, size2);
+    std::copy_n (tunerData.data() + start1, size1, dest);
+    std::copy_n (tunerData.data() + start2, size2, dest + size1);
+    tunerFifo.finishedRead (size1 + size2);
+    return size1 + size2;
+}
+
 void Engine::audioDeviceIOCallbackWithContext (const float* const* inputs, int numInputs,
                                                float* const* outputs, int numOutputs,
                                                int numSamples,
@@ -1044,6 +1055,20 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* inputs, int n
     {
         auto& c = channels[i];
 
+        // Afinador: la entrada tal cual, aunque no se esté oyendo ni grabando.
+        if ((int) i == tunerChannel && c.used && (c.type == ChannelType::Guitar || c.type == ChannelType::Audio))
+        {
+            const int ch = c.input;
+            if (ch >= 0 && ch < numInputs && inputs[ch] != nullptr)
+            {
+                int start1, size1, start2, size2;
+                tunerFifo.prepareToWrite (numSamples, start1, size1, start2, size2);
+                std::copy_n (inputs[ch], size1, tunerData.data() + start1);
+                std::copy_n (inputs[ch] + size1, size2, tunerData.data() + start2);
+                tunerFifo.finishedWrite (size1 + size2);   // si la ventana no lee, se pierde (da igual)
+            }
+        }
+
         // Sin OIR ni armada no hace falta procesarla (con el rack de guitarras,
         // las inactivas no gastan CPU en su amplificador).
         if (! c.used || ! (c.monitor || c.armed))
@@ -1066,6 +1091,7 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* inputs, int n
         int latency = outLatency;
 
         bool onset = false;
+        const float* dry = nullptr;   // voz AmpBox: la entrada sin efecto, para poder cambiarla después
 
         if (c.type == ChannelType::Pc)
         {
@@ -1100,6 +1126,9 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* inputs, int n
 
                 for (int k = 0; k < (proc != nullptr ? ins : 2); ++k)
                     block.copyFrom (k, 0, in, numSamples);
+
+                if (dynamic_cast<VoiceChain*> (proc) != nullptr)
+                    dry = in;
             }
         }
 
@@ -1124,7 +1153,7 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* inputs, int n
             juce::FloatVectorOperations::addWithMultiply (mixR, block.getReadPointer (1), volume, numSamples);
         }
 
-        sources[i] = { block.getReadPointer (0), block.getReadPointer (1), latency, c.armed.load(), onset, volume };
+        sources[i] = { block.getReadPointer (0), block.getReadPointer (1), latency, c.armed.load(), onset, volume, dry };
     }
 
     looper.setOutputLatency (outLatency);

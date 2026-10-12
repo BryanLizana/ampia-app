@@ -121,6 +121,12 @@ public:
     static juce::String typeName (ChannelType);
     juce::String getPcStatus() const { return pcAudio.getStatus(); }
 
+    // Afinador: la entrada (sin efecto) de un canal va a una cola que lee la ventana.
+    void setTunerChannel (int index) { tunerChannel = index; }   // -1 = apagado
+    int getTunerChannel() const      { return tunerChannel; }
+    int readTuner (float* dest, int maxSamples);                  // hilo de mensajes
+    double getSampleRate() const     { return sampleRate; }
+
     float takeInputPeak()  { return inputPeak.exchange (0.0f); }
     float takeOutputPeak() { return outputPeak.exchange (0.0f); }
 
@@ -175,6 +181,10 @@ private:
     std::atomic<int> deviceInLatency { 0 }, deviceOutLatency { 0 };
     int blockSize = 256;
     std::atomic<float> inputPeak { 0.0f }, outputPeak { 0.0f };
+
+    std::atomic<int> tunerChannel { -1 };
+    juce::AbstractFifo tunerFifo { 32768 };
+    std::vector<float> tunerData = std::vector<float> (32768);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Engine)
 };

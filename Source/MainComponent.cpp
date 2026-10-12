@@ -313,6 +313,11 @@ public:
         addAndMakeVisible (muteButton);
         addAndMakeVisible (deleteButton);
         addAndMakeVisible (separateButton);
+        addChildComponent (voiceButton);
+
+        voiceButton.setColour (juce::TextButton::buttonColourId, accent.withAlpha (0.35f));
+        voiceButton.setTooltip ("Cambiar la voz de esta pista (estilo, brillo, reverb...)");
+        voiceButton.onClick = [this] { if (onEditVoice) onEditVoice (slot); };
 
         separateButton.setTooltip ("Sacar la bateria o el bajo de esta pista (Demucs)");
         separateButton.onClick = [this]
@@ -363,7 +368,7 @@ public:
         deleteButton.onClick = [this] { looper.deleteTrack (slot); };
 
         for (auto* c : std::initializer_list<juce::Component*> { &gainSlider, &panSlider, &muteButton, &deleteButton,
-                                                                 &separateButton })
+                                                                 &separateButton, &voiceButton })
             noKeyboardFocus (*c);
 
         // La rueda del mouse controla el tempo, no los sliders.
@@ -408,7 +413,20 @@ public:
         }
     }
 
+    // Pista de voz re-editable (botón VOZ) y si se está volviendo a procesar.
+    void setVoice (bool editable, bool rendering)
+    {
+        voiceButton.setVisible (editable);
+
+        if (voiceRendering != rendering)
+        {
+            voiceRendering = rendering;
+            repaint();
+        }
+    }
+
     std::function<void (int slot, int stems)> onSeparate;
+    std::function<void (int slot)> onEditVoice;
 
     void paint (juce::Graphics& g) override
     {
@@ -441,6 +459,11 @@ public:
             g.setColour (accent);
             g.drawText ("SEPARANDO...", meter, juce::Justification::centred);
         }
+        else if (voiceRendering)
+        {
+            g.setColour (accent);
+            g.drawText ("APLICANDO VOZ...", meter, juce::Justification::centred);
+        }
 
         // Marca del centro del paneo.
         auto pan = panSlider.getBounds().withTrimmedRight (38);
@@ -458,6 +481,8 @@ public:
         r.removeFromRight (6);
         separateButton.setBounds (r.removeFromRight (74).reduced (0, 4));
         r.removeFromRight (6);
+        voiceButton.setBounds (r.removeFromRight (46).reduced (0, 4));
+        r.removeFromRight (6);
         panSlider.setBounds (r.removeFromRight (120));
         r.removeFromRight (6);
         meter = r.removeFromLeft (120).reduced (0, 10);
@@ -472,9 +497,9 @@ private:
 
     juce::Label nameLabel;
     juce::Slider gainSlider, panSlider;
-    juce::TextButton muteButton { "M" }, deleteButton { "X" }, separateButton { "SEPARAR" };
+    juce::TextButton muteButton { "M" }, deleteButton { "X" }, separateButton { "SEPARAR" }, voiceButton { "VOZ" };
     juce::Rectangle<int> meter;
-    bool separating = false;
+    bool separating = false, voiceRendering = false;
     float level = 0.0f;
 };
 
@@ -485,7 +510,7 @@ class ChannelRow : public juce::Component
 public:
     struct Callbacks
     {
-        std::function<void (int)> openEditor, closeEditor, removed;
+        std::function<void (int)> openEditor, closeEditor, removed, openTuner;
         std::function<void()> changed;   // devolver el teclado a la ventana principal
         // Muestra "Cargando <plugin>..." y después llama a la función (la carga
         // bloquea la ventana; así se ve qué está pasando).
@@ -496,7 +521,7 @@ public:
         : engine (engineIn), index (indexIn), channel (engineIn.getChannel (indexIn)), callbacks (std::move (callbacksIn))
     {
         for (auto* c : std::initializer_list<juce::Component*> { &armButton, &numberLabel, &nameLabel, &typeLabel,
-                                                                 &sourceBox, &pluginButton, &editButton,
+                                                                 &sourceBox, &pluginButton, &editButton, &tunerButton,
                                                                  &monitorButton, &removeButton })
             addAndMakeVisible (c);
 
@@ -565,6 +590,8 @@ public:
         pluginButton.onClick = [this] { showPluginMenu(); };
         editButton.onClick = [this] { callbacks.openEditor (index); };
         editButton.setTooltip ("Abrir la ventana del plugin");
+        tunerButton.onClick = [this] { callbacks.openTuner (index); };
+        tunerButton.setTooltip ("Afinador: muestra la nota que tocas o cantas y si estas afinado");
 
         removeButton.setTooltip ("Quitar esta entrada");
         removeButton.onClick = [this] { callbacks.removed (index); };
@@ -582,6 +609,7 @@ public:
         armButton.setToggleState (channel.armed, juce::dontSendNotification);
         monitorButton.setToggleState (channel.monitor, juce::dontSendNotification);
         volumeSlider.setValue (channel.volume, juce::dontSendNotification);
+        tunerButton.setVisible (guitar || channel.type == Engine::ChannelType::Audio);
 
         auto* proc = engine.getChannelProcessor (index);
         const auto none = channel.type == Engine::ChannelType::Midi ? juce::String ("Elegir instrumento...")
@@ -722,6 +750,8 @@ public:
         pluginButton.setBounds (r.removeFromLeft (160));
         r.removeFromLeft (4);
         editButton.setBounds (r.removeFromLeft (56));
+        r.removeFromLeft (4);
+        tunerButton.setBounds (r.removeFromLeft (62));
         r.removeFromLeft (6);
         removeButton.setBounds (r.removeFromRight (30));
         r.removeFromRight (6);
@@ -860,7 +890,7 @@ private:
     Callbacks callbacks;
 
     juce::TextButton armButton { juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x8f")) },   // ●
-                     pluginButton, editButton { "Editar" }, monitorButton { "OIR" }, removeButton { "X" };
+                     pluginButton, editButton { "Editar" }, tunerButton { "AFINAR" }, monitorButton { "OIR" }, removeButton { "X" };
     juce::Label numberLabel, nameLabel, typeLabel;
     juce::ComboBox sourceBox;
     juce::Slider volumeSlider;
@@ -984,7 +1014,7 @@ MainComponent::MainComponent()
 {
     for (auto* c : std::initializer_list<juce::Component*> { &audioButton, &reloadButton, &recButton,
                                                              &playButton, &undoButton, &redoButton, &clearButton,
-                                                             &metroButton, &keysButton, &waitButton })
+                                                             &metroButton, &keysButton, &waitButton, &tapButton })
     {
         addAndMakeVisible (c);
         noKeyboardFocus (*c);
@@ -1012,6 +1042,8 @@ MainComponent::MainComponent()
     clearButton.setTooltip ("Borrar todo el loop (Supr)");
     clearButton.setImages (trashIcon (juce::Colours::white.withAlpha (0.85f)).get(), trashIcon (recRed).get());
     metroButton.onClick = [this] { performAction ("metro"); };
+    tapButton.onClick = [this] { performAction ("tap"); };
+    tapButton.setTooltip ("Toca al ritmo (3 o 4 veces) para fijar el tempo (tecla T)");
     keysButton.onClick = [this] { showKeySettings(); };
 
     metroButton.setColour (juce::TextButton::buttonOnColourId, accent);
@@ -1063,7 +1095,7 @@ MainComponent::MainComponent()
     loopsBox.setSelectedId (4, juce::dontSendNotification);
     loopsBox.setTooltip ("Cuantas veces se repite el loop en el MP3");
 
-    exportButton.onClick = [this] { exportMp3(); };
+    exportButton.onClick = [this] { showExportMenu(); };
     folderButton.onClick = [] { exportFolder().createDirectory(); exportFolder().startAsProcess(); };
     folderButton.setTooltip ("Abrir la carpeta de exportados");
     folderButton.setImages (folderIcon (juce::Colours::white.withAlpha (0.8f)).get(),
@@ -1074,6 +1106,7 @@ MainComponent::MainComponent()
     {
         rows.push_back (std::make_unique<TrackRow> (engine.looper, i));
         rows.back()->onSeparate = [this] (int slot, int stems) { separateTrack (slot, stems); };
+        rows.back()->onEditVoice = [this] (int slot) { voiceTracks.showEditor (slot, "Voz de la pista - " + trackName (slot)); };
         addChildComponent (*rows.back());
     }
 
@@ -1101,6 +1134,7 @@ MainComponent::MainComponent()
     callbacks.openEditor = [this] (int i) { showPluginEditor (i); };
     callbacks.closeEditor = [this] (int i) { closePluginEditor (i); };
     callbacks.removed = [this] (int i) { removeChannel (i); };
+    callbacks.openTuner = [this] (int i) { showTuner (i); };
     callbacks.changed = [this] { grabKeyboardFocus(); };
     callbacks.loading = [this] (const juce::String& name, std::function<void()> work)
     {
@@ -1279,8 +1313,32 @@ void MainComponent::addChannel (Engine::ChannelType type)
     grabKeyboardFocus();
 }
 
+// Una sola ventana de afinador: abrirla en otra entrada la cambia.
+void MainComponent::showTuner (int channel)
+{
+    if (tunerWindow != nullptr && tunerWindow->getChannel() == channel)
+    {
+        tunerWindow->toFront (true);
+        return;
+    }
+
+    tunerWindow = nullptr;
+    juce::Component::SafePointer<MainComponent> safe (this);
+    tunerWindow = std::make_unique<TunerWindow> (engine, channel, [safe]
+    {
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe != nullptr)
+                safe->tunerWindow = nullptr;
+        });
+    });
+}
+
 void MainComponent::removeChannel (int channel)
 {
+    if (tunerWindow != nullptr && tunerWindow->getChannel() == channel)
+        tunerWindow = nullptr;
+
     closePluginEditor (channel);
     engine.removeChannel (channel);
     refreshChannels();
@@ -1338,6 +1396,7 @@ void MainComponent::performAction (const juce::String& id)
         looper.setWaitForSound (! looper.isWaitForSound());
         engine.saveSettings();
     }
+    else if (id == "tap")       tapTempo();
     else if (id == "metro")
     {
         looper.setMetronome (! looper.isMetronomeOn());
@@ -1361,29 +1420,47 @@ void MainComponent::refreshPresetTitle()
                          juce::dontSendNotification);
 }
 
-void MainComponent::exportMp3()
+void MainComponent::showExportMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem (1, "Mezcla (un MP3)");
+    menu.addItem (2, "Multipista (un MP3 por pista + la mezcla)");
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&exportButton), [safe] (int result)
+    {
+        if (safe != nullptr && result > 0)
+            safe->exportMp3 (result == 2);
+    });
+}
+
+void MainComponent::exportMp3 (bool separateTracks)
 {
     auto& looper = engine.looper;
+    const int loops = loopsBox.getSelectedId();
     juce::AudioBuffer<float> mix;
 
-    if (! looper.renderMix (mix, loopsBox.getSelectedId()))
+    if (! looper.renderMix (mix, loops))
     {
         exportLabel.setText ("No hay loop para exportar", juce::dontSendNotification);
         return;
     }
 
-    // Que no sature: si pasa de 0 dB se baja todo un poco.
-    auto peak = mix.getMagnitude (0, mix.getNumSamples());
-    if (peak > 0.98f)
-        mix.applyGain (0.98f / peak);
+    // Que no sature: si pasa de 0 dB se baja todo un poco. Las pistas sueltas se bajan
+    // lo mismo, para que sumadas en otro programa den la mezcla.
+    const auto peak = mix.getMagnitude (0, mix.getNumSamples());
+    const float gain = peak > 0.98f ? 0.98f / peak : 1.0f;
+    mix.applyGain (gain);
 
-    auto dir = exportFolder();
+    // Multipista: una carpeta por exportación, con un archivo por pista.
+    const auto base = "AmpBox " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H%M%S");
+    auto dir = separateTracks ? exportFolder().getChildFile (base) : exportFolder();
     dir.createDirectory();
-    auto base = "AmpBox " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H%M%S");
-    auto wav = dir.getChildFile (base + ".wav");
-    auto mp3 = dir.getChildFile (base + ".mp3");
 
+    juce::Array<juce::File> wavs;
+    auto writeWav = [&] (const juce::AudioBuffer<float>& audio, const juce::String& name)
     {
+        auto wav = dir.getChildFile (juce::File::createLegalFileName (name) + ".wav");
         juce::WavAudioFormat format;
         std::unique_ptr<juce::OutputStream> stream (wav.createOutputStream());
         std::unique_ptr<juce::AudioFormatWriter> writer;
@@ -1394,17 +1471,38 @@ void MainComponent::exportMp3()
         if (writer == nullptr)
         {
             exportLabel.setText ("No se pudo escribir " + wav.getFileName(), juce::dontSendNotification);
-            return;
+            return false;
         }
 
         stream.release(); // ahora es del writer
-        writer->writeFromAudioSampleBuffer (mix, 0, mix.getNumSamples());
+        writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples());
+        wavs.add (wav);
+        return true;
+    };
+
+    if (! writeWav (mix, separateTracks ? juce::String ("00 Mezcla") : base))
+        return;
+
+    if (separateTracks)
+    {
+        int number = 0;
+        for (auto slot : visibleTracks())
+        {
+            juce::AudioBuffer<float> audio;
+            if (! looper.renderTrack (slot, audio, loops))
+                continue; // muteada o grabándose
+
+            audio.applyGain (gain);
+            if (! writeWav (audio, juce::String (++number).paddedLeft ('0', 2) + " " + trackName (slot)))
+                return;
+        }
     }
 
+    const auto shown = separateTracks ? dir : wavs[0];
     auto ffmpeg = findFfmpeg();
     if (! ffmpeg.existsAsFile())
     {
-        exportFinished (false, wav);
+        exportFinished (false, shown, wavs.size());
         return;
     }
 
@@ -1412,42 +1510,84 @@ void MainComponent::exportMp3()
     exportLabel.setText ("Convirtiendo a MP3...", juce::dontSendNotification);
 
     juce::Component::SafePointer<MainComponent> safe (this);
-    juce::Thread::launch ([safe, ffmpeg, wav, mp3]
+    juce::Thread::launch ([safe, ffmpeg, wavs, shown]
     {
-        juce::ChildProcess process;
-        juce::StringArray args { ffmpeg.getFullPathName(), "-y", "-loglevel", "error", "-i", wav.getFullPathName(),
-                                 "-codec:a", "libmp3lame", "-b:a", "320k", mp3.getFullPathName() };
+        bool ok = true;
 
-        bool ok = process.start (args);
-        if (ok)
+        for (auto& wav : wavs)
         {
-            process.readAllProcessOutput();
-            ok = process.getExitCode() == 0 && mp3.existsAsFile();
+            const auto mp3 = wav.withFileExtension ("mp3");
+            juce::ChildProcess process;
+            juce::StringArray args { ffmpeg.getFullPathName(), "-y", "-loglevel", "error", "-i", wav.getFullPathName(),
+                                     "-codec:a", "libmp3lame", "-b:a", "320k", mp3.getFullPathName() };
+
+            bool converted = process.start (args);
+            if (converted)
+            {
+                process.readAllProcessOutput();
+                converted = process.getExitCode() == 0 && mp3.existsAsFile();
+            }
+
+            if (converted)
+                wav.deleteFile();
+
+            ok = ok && converted;
         }
 
-        if (ok)
-            wav.deleteFile();
+        const auto result = ok && ! shown.isDirectory() ? shown.withFileExtension ("mp3") : shown;
+        const int count = wavs.size();
 
-        juce::MessageManager::callAsync ([safe, ok, mp3, wav]
+        juce::MessageManager::callAsync ([safe, ok, result, count]
         {
             if (safe != nullptr)
-                safe->exportFinished (ok, ok ? mp3 : wav);
+                safe->exportFinished (ok, result, count);
         });
     });
 }
 
-void MainComponent::exportFinished (bool ok, const juce::File& file)
+void MainComponent::exportFinished (bool ok, const juce::File& file, int numFiles)
 {
     exportButton.setEnabled (true);
-    exportLabel.setText (ok ? "Guardado: " + file.getFileName()
-                            : "Sin MP3 (ffmpeg fallo), quedo el WAV: " + file.getFileName(),
-                         juce::dontSendNotification);
+
+    if (file.isDirectory())
+        exportLabel.setText ((ok ? "Guardado en " : "Sin MP3 (ffmpeg fallo), quedaron WAV en ") + file.getFileName()
+                               + " (" + juce::String (numFiles) + " archivos)",
+                             juce::dontSendNotification);
+    else
+        exportLabel.setText (ok ? "Guardado: " + file.getFileName()
+                                : "Sin MP3 (ffmpeg fallo), quedo el WAV: " + file.getFileName(),
+                             juce::dontSendNotification);
 }
 
 void MainComponent::changeBpm (float delta)
 {
     auto& looper = engine.looper;
     looper.setBpm (std::round (looper.getBpm()) + delta);
+}
+
+// Promedio de los últimos toques; si pasan más de 2 s, se empieza de nuevo.
+void MainComponent::tapTempo()
+{
+    auto& looper = engine.looper;
+    if (looper.isTempoLocked())
+    {
+        exportLabel.setText ("Con el loop sonando el tempo queda fijo", juce::dontSendNotification);
+        return;
+    }
+
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    if (! tapTimes.empty() && now - tapTimes.back() > 2000.0)
+        tapTimes.clear();
+
+    tapTimes.push_back (now);
+    if (tapTimes.size() > 5)
+        tapTimes.erase (tapTimes.begin());
+
+    if (tapTimes.size() >= 2)
+    {
+        const double beatMs = (tapTimes.back() - tapTimes.front()) / (double) (tapTimes.size() - 1);
+        looper.setBpm ((float) std::round (60000.0 / beatMs));
+    }
 }
 
 void MainComponent::refreshHelp()
@@ -1461,7 +1601,7 @@ void MainComponent::refreshHelp()
             parts.add (key.getTextDescription() + ": " + a.name);
     }
 
-    helpLabel.setText (parts.joinIntoString ("   |   ") + "   |   Rueda del mouse: tempo",
+    helpLabel.setText (parts.joinIntoString ("   |   ") + "   |   Rueda del mouse: tempo   |   Clic en la barra del loop: ir a esa parte",
                        juce::dontSendNotification);
 }
 
@@ -1548,11 +1688,7 @@ void MainComponent::refreshTracks()
         for (size_t n = 0; n < active.size(); ++n)
         {
             auto& row = *rows[(size_t) active[n]];
-            auto source = engine.looper.getTrack (active[n]).source;
-            auto& channel = engine.getChannel (source);
-            const int stem = engine.looper.getTrack (active[n]).stem;
-            row.sync ((int) n + 1, (channel.used ? channel.name : "Entrada " + juce::String (source + 1))
-                                     + (stem == Looper::Drums ? " - bateria" : stem == Looper::Bass ? " - bajo" : ""));
+            row.sync ((int) n + 1, trackName (active[n]));
             row.setVisible (true);
         }
 
@@ -1562,6 +1698,7 @@ void MainComponent::refreshTracks()
     for (size_t i = 0; i < rows.size(); ++i)
     {
         rows[i]->setSeparating ((int) i == separatingSlot);
+        rows[i]->setVoice (voiceTracks.canEdit ((int) i), voiceTracks.isRendering ((int) i));
 
         if (rows[i]->isVisible())
             rows[i]->tick();
@@ -1757,6 +1894,15 @@ namespace
     constexpr int topRow = 96, bottomRow = 112;
     constexpr int purple = 49, purpleHalf = 51, red = 5, yellow = 13, yellowHalf = 15,
                   blue = 45, blueHalf = 47, cyan = 37, orange = 9, green = 21;
+}
+
+juce::String MainComponent::trackName (int slot)
+{
+    auto& track = engine.looper.getTrack (slot);
+    auto& channel = engine.getChannel (track.source);
+    const int stem = track.stem;
+    return (channel.used ? channel.name : "Entrada " + juce::String (track.source + 1))
+             + (stem == Looper::Drums ? " - bateria" : stem == Looper::Bass ? " - bajo" : "");
 }
 
 std::vector<int> MainComponent::visibleTracks() const
@@ -2120,6 +2266,42 @@ void MainComponent::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWh
         changeBpm (wheel.deltaY > 0.0f ? 1.0f : -1.0f);
 }
 
+// Barra del loop: clic o arrastre para ir a esa parte (como en un reproductor).
+void MainComponent::mouseMove (const juce::MouseEvent& e)
+{
+    const bool overBar = loopBar.contains (e.getPosition()) && engine.looper.getLoopSeconds() > 0.0;
+    setMouseCursor (overBar ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+}
+
+void MainComponent::mouseDown (const juce::MouseEvent& e)
+{
+    seeking = loopBar.contains (e.getPosition()) && engine.looper.getLoopSeconds() > 0.0;
+    if (seeking)
+        seekTo (e);
+}
+
+void MainComponent::mouseDrag (const juce::MouseEvent& e)
+{
+    if (seeking)
+        seekTo (e);
+}
+
+void MainComponent::mouseUp (const juce::MouseEvent&)
+{
+    seeking = false;
+}
+
+void MainComponent::seekTo (const juce::MouseEvent& e)
+{
+    if (engine.looper.isRecording())
+    {
+        exportLabel.setText ("Grabando no se puede mover el loop", juce::dontSendNotification);
+        return;
+    }
+
+    engine.looper.seek ((e.position.x - (float) loopBar.getX()) / (float) juce::jmax (1, loopBar.getWidth()));
+}
+
 void MainComponent::paintOverChildren (juce::Graphics& g)
 {
     paintLaunchkeyFrame (g);
@@ -2376,7 +2558,8 @@ void MainComponent::resized()
     auto tempo = r.removeFromTop (30);
     metroButton.setBounds (tempo.removeFromLeft (120));
     tempo.removeFromLeft (4);
-    bpmLabel.setBounds (tempo.removeFromLeft (100));
+    bpmLabel.setBounds (tempo.removeFromLeft (90));
+    tapButton.setBounds (tempo.removeFromLeft (50));
     tempo.removeFromLeft (12);
     keysButton.setBounds (tempo.removeFromRight (90));
     tempo.removeFromRight (8);

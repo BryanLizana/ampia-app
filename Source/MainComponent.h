@@ -1,5 +1,7 @@
 #pragma once
 #include "Engine.h"
+#include "VoiceTracks.h"
+#include "Tuner.h"
 
 class TrackRow;
 class ChannelRow;
@@ -18,6 +20,10 @@ public:
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -35,11 +41,15 @@ private:
     void showKeySettings();
     void performAction (const juce::String& id);
     void changeBpm (float delta);
+    void tapTempo();
+    void seekTo (const juce::MouseEvent&);
     void refreshHelp();
     void pickPreset (const juce::String& path);
     void refreshPresetTitle();
-    void exportMp3();
-    void exportFinished (bool ok, const juce::File& file);
+    void showExportMenu();
+    void exportMp3 (bool separateTracks);
+    void exportFinished (bool ok, const juce::File& file, int numFiles);
+    juce::String trackName (int slot);
     void refreshInputs();
     void refreshStatus();
     void refreshTransport();
@@ -54,6 +64,11 @@ private:
     void layoutTracks();
 
     Engine engine;
+    VoiceTracks voiceTracks { engine };   // después del motor: se destruye antes
+    std::unique_ptr<TunerWindow> tunerWindow;
+    // Sin esto no se ven los tooltips. En el escritorio: sirve también en las otras ventanas.
+    juce::TooltipWindow tooltipWindow { nullptr, 600 };
+    void showTuner (int channel);
 
     juce::TextButton audioButton { "Audio..." },
                      reloadButton { juce::String (juce::CharPointer_UTF8 ("\xe2\x86\xbb")) }; // recargar
@@ -68,7 +83,7 @@ private:
     juce::TextButton recButton { "REC" }, playButton { "PLAY" }, undoButton { "DESHACER" },
                      redoButton { "REHACER" },
                      metroButton { "METRONOMO" }, keysButton { "Teclas..." },
-                     waitButton { "REC AL TOCAR" };
+                     waitButton { "REC AL TOCAR" }, tapButton { "TAP" };
     juce::Label bpmLabel, helpLabel;
 
     std::unique_ptr<PresetPanel> presetPanel;
@@ -85,6 +100,8 @@ private:
     juce::String trackSignature;
 
     float inLevel = 0.0f, outLevel = 0.0f;
+    std::vector<double> tapTimes;         // últimos toques de TAP (ms)
+    bool seeking = false;                 // arrastrando el cursor de la barra del loop
     int midiCheckTicks = 0;
     int separatingSlot = -1;              // pista que Demucs está separando
     int separatingOrder = 0;              // su toma (si se borra y se reusa la pista, no es la misma)
