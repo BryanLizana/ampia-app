@@ -371,9 +371,7 @@ public:
                                                                  &separateButton, &voiceButton })
             noKeyboardFocus (*c);
 
-        // La rueda del mouse controla el tempo, no los sliders.
-        gainSlider.setScrollWheelEnabled (false);
-        panSlider.setScrollWheelEnabled (false);
+        // Con el mouse encima, la rueda mueve el slider; en el resto de la ventana, el tempo.
     }
 
     // Copia los valores de la pista a los controles (al aparecer la fila).
@@ -474,14 +472,14 @@ public:
     void resized() override
     {
         auto r = getLocalBounds().reduced (8, 4);
-        nameLabel.setBounds (r.removeFromLeft (130));
-        deleteButton.setBounds (r.removeFromRight (32).reduced (0, 4));
+        nameLabel.setBounds (r.removeFromLeft (140));
+        deleteButton.setBounds (r.removeFromRight (36).reduced (0, 3));
         r.removeFromRight (6);
-        muteButton.setBounds (r.removeFromRight (32).reduced (0, 4));
+        muteButton.setBounds (r.removeFromRight (36).reduced (0, 3));
         r.removeFromRight (6);
-        separateButton.setBounds (r.removeFromRight (74).reduced (0, 4));
+        separateButton.setBounds (r.removeFromRight (84).reduced (0, 3));
         r.removeFromRight (6);
-        voiceButton.setBounds (r.removeFromRight (46).reduced (0, 4));
+        voiceButton.setBounds (r.removeFromRight (52).reduced (0, 3));
         r.removeFromRight (6);
         panSlider.setBounds (r.removeFromRight (120));
         r.removeFromRight (6);
@@ -560,7 +558,7 @@ public:
         nameLabel.setEditable (false, true, false);
         nameLabel.addMouseListener (this, false);
         nameLabel.setTooltip ("Doble clic para cambiar el nombre");
-        nameLabel.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        nameLabel.setFont (juce::FontOptions (16.0f, juce::Font::bold));
         nameLabel.onTextChange = [this]
         {
             auto name = nameLabel.getText().trim();
@@ -572,7 +570,7 @@ public:
             callbacks.changed();
         };
 
-        typeLabel.setFont (juce::FontOptions (11.0f));
+        typeLabel.setFont (juce::FontOptions (12.0f));
         typeLabel.setColour (juce::Label::textColourId, accent);
 
         sourceBox.onChange = [this] { sourceChanged(); };
@@ -584,7 +582,7 @@ public:
         volumeSlider.setRange (0.0, 1.5, 0.01);
         volumeSlider.setDoubleClickReturnValue (true, 1.0);
         volumeSlider.setPopupDisplayEnabled (true, true, nullptr);
-        volumeSlider.setScrollWheelEnabled (false);   // la rueda es el tempo
+        // Con el mouse encima, la rueda mueve el volumen; en el resto de la ventana, el tempo.
         volumeSlider.setColour (juce::Slider::thumbColourId, accent);
         volumeSlider.textFromValueFunction = [] (double v)
         {
@@ -748,25 +746,25 @@ public:
     void resized() override
     {
         auto r = getLocalBounds().reduced (6, 5);
-        armButton.setBounds (r.removeFromLeft (34));
-        numberLabel.setBounds (r.removeFromLeft (22));
-        auto names = r.removeFromLeft (130);
+        armButton.setBounds (r.removeFromLeft (38));
+        numberLabel.setBounds (r.removeFromLeft (24));
+        auto names = r.removeFromLeft (140);
         nameLabel.setBounds (names.removeFromTop (names.getHeight() * 3 / 5));
         typeLabel.setBounds (names);
         r.removeFromLeft (6);
-        sourceBox.setBounds (r.removeFromLeft (140));
+        sourceBox.setBounds (r.removeFromLeft (150));
         r.removeFromLeft (6);
-        pluginButton.setBounds (r.removeFromLeft (160));
+        pluginButton.setBounds (r.removeFromLeft (170));
         r.removeFromLeft (4);
-        editButton.setBounds (r.removeFromLeft (56));
+        editButton.setBounds (r.removeFromLeft (64));
         r.removeFromLeft (4);
-        tunerButton.setBounds (r.removeFromLeft (62));
+        tunerButton.setBounds (r.removeFromLeft (72));
         r.removeFromLeft (6);
-        removeButton.setBounds (r.removeFromRight (30));
+        removeButton.setBounds (r.removeFromRight (34));
         r.removeFromRight (6);
-        monitorButton.setBounds (r.removeFromLeft (48));
+        monitorButton.setBounds (r.removeFromLeft (54));
         r.removeFromLeft (6);
-        volumeSlider.setBounds (r.removeFromLeft (100));
+        volumeSlider.setBounds (r.removeFromLeft (110));
         r.removeFromLeft (6);
         meter = r.reduced (0, 8);
     }
@@ -1080,11 +1078,14 @@ MainComponent::MainComponent()
     playButton.onClick = [this] { engine.looper.togglePlay(); };
     undoButton.onClick = [this] { performAction ("undo"); };
     redoButton.onClick = [this] { performAction ("redo"); };
+    undoButton.setTooltip ("Deshacer");
+    redoButton.setTooltip ("Rehacer");
     clearButton.onClick = [this] { performAction ("clear"); };
     clearButton.setTooltip ("Borrar todo el loop (Supr)");
     clearButton.setImages (trashIcon (juce::Colours::white.withAlpha (0.85f)).get(), trashIcon (recRed).get());
     metroButton.onClick = [this] { performAction ("metro"); };
     tapButton.onClick = [this] { performAction ("tap"); };
+    tapButton.setTriggeredOnMouseDown (true);   // al presionar: al soltar el tiempo sale corrido
     tapButton.setTooltip ("Toca al ritmo (3 o 4 veces) para fijar el tempo (tecla T)");
     keysButton.onClick = [this] { showKeySettings(); };
 
@@ -1098,8 +1099,8 @@ MainComponent::MainComponent()
     bpmLabel.setInterceptsMouseClicks (false, false);
 
     helpLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    helpLabel.setFont (juce::FontOptions (12.0f));
-    statusLabel.setFont (juce::FontOptions (12.5f));
+    helpLabel.setFont (juce::FontOptions (13.0f));
+    statusLabel.setFont (juce::FontOptions (13.5f));
 
     pluginLabel.setColour (juce::Label::textColourId, accent);
 
@@ -1154,7 +1155,7 @@ MainComponent::MainComponent()
 
     // Entradas: una fila por canal usado.
     addAndMakeVisible (channelsTitle);
-    channelsTitle.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+    channelsTitle.setFont (juce::FontOptions (16.0f, juce::Font::bold));
     channelsTitle.setColour (juce::Label::textColourId, accent);
 
     for (auto* b : { &addGuitarButton, &addAudioButton, &addMidiButton, &addPcButton })
@@ -1221,10 +1222,7 @@ MainComponent::MainComponent()
         presetPanel->refresh();   // la biblioteca se lee en engine.start()
         refreshPresetTitle();
         startTimerHz (30);
-
-        pluginQueue = engine.getPendingPlugins();
-        pluginTotal = (int) pluginQueue.size();
-        restoreNextPlugin();
+        grabKeyboardFocus();
     });
 }
 
@@ -1233,7 +1231,7 @@ MainComponent::~MainComponent()
     stopTimer();
     engine.onDawMessage = nullptr;
     engine.deviceManager.removeChangeListener (this);
-    engine.saveState();
+    engine.saveSettings();
     editorWindows.clear();
     engine.stop();
 }
@@ -1274,40 +1272,6 @@ void MainComponent::runLoadingWork()
             safe->loadingTitle = {};
             safe->repaint();
         }
-    });
-}
-
-// Los plugins guardados de la sesión anterior, de a uno, con aviso.
-void MainComponent::restoreNextPlugin()
-{
-    if (pluginQueue.empty())
-    {
-        pluginLabel.setText (pluginFailures.isEmpty() ? juce::String()
-                                                      : "No se pudo cargar: " + pluginFailures.joinIntoString (", "),
-                             juce::dontSendNotification);
-        refreshChannels();
-        refreshStatus();
-        grabKeyboardFocus();
-        return;
-    }
-
-    const int index = pluginQueue.front();
-    pluginQueue.erase (pluginQueue.begin());
-
-    auto& c = engine.getChannel (index);
-    const auto name = c.pluginFile.getFileNameWithoutExtension();
-    const int done = pluginTotal - (int) pluginQueue.size();
-
-    showLoading ("Cargando " + name,
-                 c.name + "  (" + juce::String (done) + " de " + juce::String (pluginTotal) + ")\n"
-                     + "Los amplificadores grandes (AmpliTube) tardan hasta 1 minuto.",
-                 [this, index, name]
-    {
-        if (! engine.restoreChannelPlugin (index))
-            pluginFailures.add (name);
-
-        refreshChannels();
-        restoreNextPlugin();
     });
 }
 
@@ -1650,7 +1614,8 @@ void MainComponent::checkAmpliTubes()
         "con un preset por guitarra.");
 }
 
-// Promedio de los últimos toques; si pasan más de 2 s, se empieza de nuevo.
+// Mediana de los intervalos entre los últimos toques (un toque desparejo no la mueve).
+// Si pasan más de 2 s, o el ritmo cambia mucho, se empieza de nuevo.
 void MainComponent::tapTempo()
 {
     auto& looper = engine.looper;
@@ -1664,15 +1629,38 @@ void MainComponent::tapTempo()
     if (! tapTimes.empty() && now - tapTimes.back() > 2000.0)
         tapTimes.clear();
 
-    tapTimes.push_back (now);
-    if (tapTimes.size() > 5)
-        tapTimes.erase (tapTimes.begin());
-
+    // Un ritmo nuevo (un 25 % distinto del que se venía tocando) borra los toques viejos.
     if (tapTimes.size() >= 2)
     {
-        const double beatMs = (tapTimes.back() - tapTimes.front()) / (double) (tapTimes.size() - 1);
-        looper.setBpm ((float) std::round (60000.0 / beatMs));
+        const double last = now - tapTimes.back(), before = tapTimes.back() - tapTimes[tapTimes.size() - 2];
+        if (std::abs (last - before) > before * 0.25)
+            tapTimes.erase (tapTimes.begin(), tapTimes.end() - 1);
     }
+
+    tapTimes.push_back (now);
+    if (tapTimes.size() > 6)
+        tapTimes.erase (tapTimes.begin());
+
+    // El click arranca con el toque: queda alineado con lo que se toca.
+    looper.restartClick();
+
+    if (tapTimes.size() < 2)
+    {
+        exportLabel.setText ("TAP: sigue tocando al ritmo...", juce::dontSendNotification);
+        return;
+    }
+
+    std::vector<double> gaps;
+    for (size_t i = 1; i < tapTimes.size(); ++i)
+        gaps.push_back (tapTimes[i] - tapTimes[i - 1]);
+
+    std::sort (gaps.begin(), gaps.end());
+    const double beatMs = gaps[gaps.size() / 2];
+    looper.setBpm ((float) std::round (60000.0 / beatMs));
+    engine.saveSettings();
+    exportLabel.setText ("TAP: " + juce::String (juce::roundToInt (looper.getBpm())) + " BPM ("
+                             + juce::String ((int) tapTimes.size()) + " toques)",
+                         juce::dontSendNotification);
 }
 
 void MainComponent::refreshHelp()
@@ -2284,7 +2272,7 @@ void MainComponent::layoutTracks()
     auto r = tracksArea;
     for (auto i : order)
     {
-        rows[(size_t) i]->setBounds (r.removeFromTop (38));
+        rows[(size_t) i]->setBounds (r.removeFromTop (42));
         r.removeFromTop (4);
     }
 }
@@ -2579,10 +2567,10 @@ void MainComponent::resized()
     for (auto* c : std::initializer_list<juce::Component*> { presetPanel.get(), &presetTitle, &presetsToggle })
         c->setVisible (false);
 
-    auto top = r.removeFromTop (32);
-    audioButton.setBounds (top.removeFromLeft (100));
+    auto top = r.removeFromTop (34);
+    audioButton.setBounds (top.removeFromLeft (110));
     top.removeFromLeft (8);
-    reloadButton.setBounds (top.removeFromLeft (36));
+    reloadButton.setBounds (top.removeFromLeft (40));
     top.removeFromLeft (16);
     pluginLabel.setBounds (top.removeFromRight (360));
     statusLabel.setBounds (top);
@@ -2596,15 +2584,15 @@ void MainComponent::resized()
 
     // Entradas
     r.removeFromTop (8);
-    auto channelsHeader = r.removeFromTop (24);
-    channelsTitle.setBounds (channelsHeader.removeFromLeft (110));
-    addPcButton.setBounds (channelsHeader.removeFromRight (70));
+    auto channelsHeader = r.removeFromTop (30);
+    channelsTitle.setBounds (channelsHeader.removeFromLeft (120));
+    addPcButton.setBounds (channelsHeader.removeFromRight (80));
     channelsHeader.removeFromRight (6);
-    addMidiButton.setBounds (channelsHeader.removeFromRight (90));
+    addMidiButton.setBounds (channelsHeader.removeFromRight (100));
     channelsHeader.removeFromRight (6);
-    addAudioButton.setBounds (channelsHeader.removeFromRight (90));
+    addAudioButton.setBounds (channelsHeader.removeFromRight (100));
     channelsHeader.removeFromRight (6);
-    addGuitarButton.setBounds (channelsHeader.removeFromRight (110));
+    addGuitarButton.setBounds (channelsHeader.removeFromRight (124));
     r.removeFromTop (4);
 
     emptyHint = {};
@@ -2613,7 +2601,7 @@ void MainComponent::resized()
         if (! row->isVisible())
             continue;
 
-        row->setBounds (r.removeFromTop (40));
+        row->setBounds (r.removeFromTop (44));
         r.removeFromTop (4);
     }
 
@@ -2624,39 +2612,39 @@ void MainComponent::resized()
     }
 
     r.removeFromTop (8);
-    auto transport = r.removeFromTop (40);
-    recButton.setBounds (transport.removeFromLeft (170));
+    auto transport = r.removeFromTop (46);
+    recButton.setBounds (transport.removeFromLeft (190));
     transport.removeFromLeft (8);
-    playButton.setBounds (transport.removeFromLeft (110));
+    playButton.setBounds (transport.removeFromLeft (130));
     transport.removeFromLeft (8);
-    undoButton.setBounds (transport.removeFromLeft (100));
+    undoButton.setBounds (transport.removeFromLeft (70));
+    transport.removeFromLeft (6);
+    redoButton.setBounds (transport.removeFromLeft (70));
     transport.removeFromLeft (8);
-    redoButton.setBounds (transport.removeFromLeft (100));
+    waitButton.setBounds (transport.removeFromLeft (150));
     transport.removeFromLeft (8);
-    clearButton.setBounds (transport.removeFromLeft (48));
-    transport.removeFromLeft (8);
-    waitButton.setBounds (transport.removeFromLeft (130));
+    clearButton.setBounds (transport.removeFromLeft (54));
 
     // Tempo y exportar en una fila.
     r.removeFromTop (8);
-    auto tempo = r.removeFromTop (30);
-    metroButton.setBounds (tempo.removeFromLeft (120));
+    auto tempo = r.removeFromTop (34);
+    metroButton.setBounds (tempo.removeFromLeft (130));
     tempo.removeFromLeft (4);
     bpmLabel.setBounds (tempo.removeFromLeft (90));
-    tapButton.setBounds (tempo.removeFromLeft (50));
+    tapButton.setBounds (tempo.removeFromLeft (56));
     tempo.removeFromLeft (12);
-    keysButton.setBounds (tempo.removeFromRight (90));
+    keysButton.setBounds (tempo.removeFromRight (100));
     tempo.removeFromRight (8);
-    loopsBox.setBounds (tempo.removeFromLeft (105));
+    loopsBox.setBounds (tempo.removeFromLeft (115));
     tempo.removeFromLeft (6);
-    exportButton.setBounds (tempo.removeFromLeft (130));
+    exportButton.setBounds (tempo.removeFromLeft (145));
     tempo.removeFromLeft (6);
-    folderButton.setBounds (tempo.removeFromLeft (34).reduced (2));
+    folderButton.setBounds (tempo.removeFromLeft (38).reduced (2));
     tempo.removeFromLeft (8);
     exportLabel.setBounds (tempo);
 
     r.removeFromTop (8);
-    loopBar = r.removeFromTop (28);
+    loopBar = r.removeFromTop (30);
 
     helpLabel.setBounds (r.removeFromBottom (34));
 

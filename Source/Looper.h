@@ -86,6 +86,8 @@ public:
     bool isWaiting() const         { return waiting; }
     bool isMetronomeOn() const     { return metronomeOn; }
     void setBpm (float bpm);
+    // Parado con el metrónomo: el próximo click (tiempo 1) cae ahora (tap tempo).
+    void restartClick()            { clickRestart = true; }
     float getBpm() const           { return bpm; }
     bool isTempoLocked() const;    // con pistas sonando el tempo queda fijo
 
@@ -143,6 +145,7 @@ private:
 
     std::atomic<bool> recRequest { false }, playRequest { false }, cancelRequest { false };
     std::atomic<double> seekRequest { -1.0 };   // -1 = ninguno
+    std::atomic<bool> clickRestart { false };
     std::atomic<bool> playing { false }, recording { false };
     std::atomic<bool> metronomeOn { false }, waitForSound { true }, waiting { false };
     std::atomic<float> bpm { 100.0f };

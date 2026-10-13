@@ -30,7 +30,6 @@ private:
     void timerCallback() override;
 
     void showLoading (const juce::String& title, const juce::String& detail, std::function<void()> work);
-    void restoreNextPlugin();
     void paintLaunchkeyFrame (juce::Graphics&);
     void showAudioSettings();
     void showPluginEditor (int channel);
@@ -82,8 +81,8 @@ private:
     std::vector<std::unique_ptr<ChannelRow>> channelRows;
     juce::Rectangle<int> channelsArea;
 
-    juce::TextButton recButton { "REC" }, playButton { "PLAY" }, undoButton { "DESHACER" },
-                     redoButton { "REHACER" },
+    juce::TextButton recButton { "REC" }, playButton { "PLAY" }, undoButton { "UNDO" },
+                     redoButton { "REDO" },
                      metroButton { "METRONOMO" }, keysButton { "Teclas..." },
                      waitButton { "REC AL TOCAR" }, tapButton { "TAP" };
     juce::Label bpmLabel, helpLabel;
@@ -118,9 +117,6 @@ private:
     int loadingToken = 0;
     std::function<void()> loadingWork;          // lo que se hace cuando el aviso ya se ve
     void runLoadingWork();
-    std::vector<int> pluginQueue;               // plugins de la sesión anterior por cargar
-    int pluginTotal = 0;
-    juce::StringArray pluginFailures;
 
     std::map<int, std::unique_ptr<juce::DocumentWindow>> editorWindows;   // por canal (0 = AmpliTube)
 

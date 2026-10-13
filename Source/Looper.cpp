@@ -750,6 +750,9 @@ void Looper::process (const Source* sources, int numSources, float* left, float*
         // Parado con el metrónomo prendido: el click suena igual, para practicar o tomar el tempo.
         if (metronomeOn)
         {
+            if (clickRestart.exchange (false))
+                freeClickPos = 0;
+
             addClick (left, right, numSamples, freeClickPos, 0);
             freeClickPos += numSamples;
         }

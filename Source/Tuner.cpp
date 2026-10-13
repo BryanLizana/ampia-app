@@ -8,6 +8,8 @@ namespace
     const char* const letterNames[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     const char* const solfegeNames[] = { "DO", "DO#", "RE", "RE#", "MI", "FA", "FA#", "SOL", "SOL#", "LA", "LA#", "SI" };
 
+    // Estilo Vocal Pitch Monitor: las notas en vertical (como un piano) y la altura que
+    // suena dibujada en el tiempo, de derecha (ahora) a izquierda (hace unos segundos).
     class TunerComponent : public juce::Component, private juce::Timer
     {
     public:
@@ -22,75 +24,134 @@ namespace
             history.assign ((size_t) (window + maxLag), 0.0f);
             diff.assign ((size_t) maxLag + 2, 0.0f);
             incoming.resize (8192);
+            trace.assign ((size_t) traceLength, silence);
 
             engine.setTunerChannel (channel);
-            setSize (440, 260);
-            startTimerHz (25);
+            setSize (760, 460);
+            startTimerHz (ticksPerSecond);
         }
 
         ~TunerComponent() override { engine.setTunerChannel (-1); }
 
+        // Clic: congela / sigue. Rueda: más o menos notas a la vista.
+        void mouseDown (const juce::MouseEvent&) override { paused = ! paused; repaint(); }
+
+        void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
+        {
+            visibleNotes = juce::jlimit (6.0f, 48.0f, visibleNotes * (1.0f - wheel.deltaY * 0.6f));
+            repaint();
+        }
+
         void paint (juce::Graphics& g) override
         {
             g.fillAll (background);
-            auto r = getLocalBounds().reduced (16);
+            auto r = getLocalBounds();
 
-            g.setColour (juce::Colours::white.withAlpha (0.6f));
-            g.setFont (juce::FontOptions (13.0f));
-            g.drawText (engine.getChannel (channel).name, r.removeFromTop (18), juce::Justification::centredLeft);
-
-            const bool sounding = note >= 0 && juce::Time::getMillisecondCounter() - lastHeard < 1500;
-            const float alpha = sounding && juce::Time::getMillisecondCounter() - lastHeard < 300 ? 1.0f : 0.4f;
+            const bool sounding = note >= 0 && juce::Time::getMillisecondCounter() - lastHeard < 400;
             const bool inTune = sounding && std::abs (cents) <= 5.0f;
             const auto colour = ! sounding ? juce::Colours::grey
                               : inTune ? green : std::abs (cents) <= 15.0f ? accent : red;
 
-            // Nota grande.
-            auto noteArea = r.removeFromTop (90);
-            g.setColour (colour.withAlpha (alpha));
-            g.setFont (juce::FontOptions (64.0f, juce::Font::bold));
-            g.drawText (sounding ? juce::String (solfegeNames[note % 12]) : juce::String ("--"), noteArea,
-                        juce::Justification::centred);
+            // Arriba: nota, cents y frecuencia.
+            auto header = r.removeFromTop (54).reduced (14, 6);
+            g.setColour (colour);
+            g.setFont (juce::FontOptions (34.0f, juce::Font::bold));
+            g.drawText (sounding ? noteName (note) : juce::String ("--"), header.removeFromLeft (150),
+                        juce::Justification::centredLeft);
 
-            g.setColour (juce::Colours::white.withAlpha (0.6f));
-            g.setFont (juce::FontOptions (14.0f));
-            g.drawText (sounding ? juce::String (letterNames[note % 12]) + juce::String (note / 12 - 1)
-                                     + "   " + juce::String (frequency, 1) + " Hz"
-                                 : juce::String ("Toca una nota (una cuerda sola)"),
-                        r.removeFromTop (22), juce::Justification::centred);
-
-            // Barra de -50 a +50 cents con la aguja.
-            r.removeFromTop (10);
-            auto bar = r.removeFromTop (36).toFloat();
-            g.setColour (panel);
-            g.fillRoundedRectangle (bar, 5.0f);
-
-            const auto xFor = [&bar] (float c) { return bar.getCentreX() + c / 50.0f * bar.getWidth() * 0.5f; };
-            g.setColour (green.withAlpha (0.25f));
-            g.fillRect (juce::Rectangle<float>::leftTopRightBottom (xFor (-5.0f), bar.getY(), xFor (5.0f), bar.getBottom()));
-
-            for (int c = -40; c <= 40; c += 10)
-            {
-                g.setColour (juce::Colours::white.withAlpha (c == 0 ? 0.6f : 0.2f));
-                g.fillRect (xFor ((float) c) - 0.5f, bar.getY() + (c == 0 ? 2.0f : 10.0f), c == 0 ? 2.0f : 1.0f,
-                            bar.getHeight() - (c == 0 ? 4.0f : 20.0f));
-            }
-
-            if (sounding)
-            {
-                g.setColour (colour.withAlpha (alpha));
-                g.fillRoundedRectangle (xFor (juce::jlimit (-50.0f, 50.0f, cents)) - 3.0f, bar.getY() - 4.0f, 6.0f,
-                                        bar.getHeight() + 8.0f, 3.0f);
-            }
-
-            r.removeFromTop (8);
-            g.setColour (colour.withAlpha (alpha));
             g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
             g.drawText (! sounding ? juce::String()
                         : inTune ? juce::String ("AFINADO")
-                        : cents < 0.0f ? "BAJO " + juce::String (juce::roundToInt (-cents)) + " cents: sube (aprieta)"
-                                       : "ALTO " + juce::String (juce::roundToInt (cents)) + " cents: baja (afloja)",
-                        r.removeFromTop (24), juce::Justification::centred);
+                        : cents < 0.0f ? "BAJO " + juce::String (juce::roundToInt (-cents)) + " cents"
+                                       : "ALTO " + juce::String (juce::roundToInt (cents)) + " cents",
+                        header.removeFromLeft (170), juce::Justification::centredLeft);
+
+            g.setColour (juce::Colours::white.withAlpha (0.55f));
+            g.setFont (juce::FontOptions (13.0f));
+            g.drawText (paused ? juce::String ("PAUSA (clic para seguir)")
+                        : sounding ? juce::String (frequency, 1) + " Hz   " + juce::String (letterNames[note % 12])
+                                         + juce::String (note / 12 - 1)
+                                   : engine.getChannel (channel).name + "  -  toca o canta una nota",
+                        header, juce::Justification::centredRight);
+
+            // Teclas a la izquierda, gráfico a la derecha.
+            auto keys = r.removeFromLeft (64);
+            auto plot = r;
+            const float rowH = (float) plot.getHeight() / visibleNotes;
+            const float low = viewCentre - visibleNotes * 0.5f;
+            const auto yFor = [&] (float midi) { return (float) plot.getBottom() - (midi - low + 0.5f) * rowH; };
+
+            juce::Graphics::ScopedSaveState clip (g);
+            g.reduceClipRegion (keys.getUnion (plot));
+
+            for (int n = (int) std::floor (low) - 1; n <= (int) std::ceil (low + visibleNotes) + 1; ++n)
+            {
+                const float top = yFor ((float) n + 0.5f), bottom = yFor ((float) n - 0.5f);
+                const bool black = isBlack (((n % 12) + 12) % 12);
+                const auto row = [&] (juce::Rectangle<int> area)
+                    { return juce::Rectangle<float>::leftTopRightBottom ((float) area.getX(), top, (float) area.getRight(), bottom); };
+
+                g.setColour (black ? juce::Colour (0xff15171a) : panel.darker (0.35f));
+                g.fillRect (row (plot));
+                g.setColour (black ? juce::Colour (0xff111214) : juce::Colour (0xffd8d8d8));
+                g.fillRect (row (keys).withTrimmedRight (black ? 22.0f : 0.0f));
+
+                if (sounding && n == note)
+                {
+                    g.setColour (colour.withAlpha (0.18f));
+                    g.fillRect (row (plot));
+                    g.setColour (colour);
+                    g.fillRect (row (keys));
+                }
+
+                // Línea entre notas; más marcada entre SI y DO (cambio de octava).
+                g.setColour (juce::Colours::white.withAlpha (n % 12 == 0 ? 0.25f : 0.07f));
+                g.fillRect ((float) keys.getX(), bottom - 0.5f, (float) (plot.getRight() - keys.getX()), 1.0f);
+
+                if (! black && (rowH >= 11.0f || n % 12 == 0))
+                {
+                    g.setColour (sounding && n == note ? juce::Colours::white : juce::Colour (0xff303236));
+                    g.setFont (juce::FontOptions (juce::jlimit (9.0f, 13.0f, rowH * 0.8f),
+                                                  n % 12 == 0 ? juce::Font::bold : juce::Font::plain));
+                    g.drawText (noteName (n), row (keys).reduced (4.0f, 0.0f), juce::Justification::centredRight);
+                }
+            }
+
+            // La línea de lo que sonó: cada punto es un instante; se corta en los silencios
+            // y en los saltos de nota.
+            const float step = (float) plot.getWidth() / (float) (traceLength - 1);
+            juce::Path line;
+            bool drawing = false;
+            float previous = silence;
+
+            for (int i = 0; i < traceLength; ++i)
+            {
+                const float m = trace[(size_t) i];
+                const float x = (float) plot.getX() + (float) i * step, y = yFor (m);
+
+                if (m == silence)
+                    drawing = false;
+                else if (drawing && std::abs (m - previous) < 1.0f)
+                    line.lineTo (x, y);
+                else
+                {
+                    line.startNewSubPath (x, y);
+                    line.lineTo (x + 0.5f, y);
+                    drawing = true;
+                }
+
+                previous = m;
+            }
+
+            g.setColour (juce::Colour (0xff4fc3f7));
+            g.strokePath (line, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            // El punto de ahora, con el color de la afinación.
+            if (sounding && trace.back() != silence)
+            {
+                g.setColour (colour);
+                g.fillEllipse (juce::Rectangle<float> (12.0f, 12.0f).withCentre ({ (float) plot.getRight() - 6.0f, yFor (trace.back()) }));
+            }
         }
 
     private:
@@ -113,7 +174,11 @@ namespace
                 }
             }
 
+            if (paused)
+                return;
+
             const float hz = detect();
+            float point = silence;
 
             if (hz > 0.0f)
             {
@@ -126,7 +191,28 @@ namespace
                 frequency = nearest == note ? frequency * 0.6f + hz * 0.4f : hz;
                 note = nearest;
                 lastHeard = juce::Time::getMillisecondCounter();
+
+                // Un salto suelto de más de media octava (un armónico) no se dibuja: se espera a que se repita.
+                point = midi;
+                if (lastPoint != silence && std::abs (midi - lastPoint) > 6.0f && ! confirm)
+                {
+                    confirm = true;
+                    point = silence;
+                }
+                else
+                {
+                    confirm = false;
+                    lastPoint = midi;
+                }
             }
+
+            trace.erase (trace.begin());
+            trace.push_back (point);
+
+            // La vista sigue a la nota de a poco, sin saltar.
+            if (point != silence && std::abs (point - viewCentre) > visibleNotes * 0.3f)
+                followTarget = point;
+            viewCentre += (followTarget - viewCentre) * 0.12f;
 
             repaint();
         }
@@ -196,6 +282,23 @@ namespace
         int writePos = 0, summed = 0;
         float sum = 0.0f;
 
+        static juce::String noteName (int midi)
+        {
+            return juce::String (solfegeNames[((midi % 12) + 12) % 12]) + juce::String (midi / 12 - 1);
+        }
+
+        static bool isBlack (int pitchClass)
+        {
+            return pitchClass == 1 || pitchClass == 3 || pitchClass == 6 || pitchClass == 8 || pitchClass == 10;
+        }
+
+        static constexpr int ticksPerSecond = 50, traceLength = ticksPerSecond * 8;   // 8 segundos a la vista
+        static constexpr float silence = -1000.0f;
+        std::vector<float> trace;
+        float visibleNotes = 18.0f, viewCentre = 52.0f, followTarget = 52.0f;   // MI3: la cuerda grave al aire
+        float lastPoint = silence;
+        bool confirm = false, paused = false;
+
         int note = -1;
         float cents = 0.0f, frequency = 0.0f;
         juce::uint32 lastHeard = 0;
@@ -208,6 +311,8 @@ TunerWindow::TunerWindow (Engine& engine, int channelIn, std::function<void()> o
 {
     setUsingNativeTitleBar (true);
     setContentOwned (new TunerComponent (engine, channel), true);
+    setResizable (true, false);
+    setResizeLimits (480, 300, 2000, 1400);
     centreWithSize (getWidth(), getHeight());
     setAlwaysOnTop (true);   // que se vea mientras tocas con la ventana principal
     setVisible (true);

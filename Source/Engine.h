@@ -98,10 +98,6 @@ public:
     void setChannelInput (int index, int input) { channels[(size_t) index].input = input; saveSettings(); }
     bool loadChannelPlugin (int index, const juce::File& file, juce::String& error);
     void clearChannelPlugin (int index);
-    // Plugins guardados en la sesión anterior: se cargan de a uno (AmpliTube tarda
-    // hasta 1 min) para que la pantalla avise cuál se está cargando.
-    std::vector<int> getPendingPlugins() const;
-    bool restoreChannelPlugin (int index);
     juce::AudioProcessor* getChannelProcessor (int index) const;
 
     // Rack de guitarras: varias entradas Guitarra (cada una con su amplificador)
@@ -158,8 +154,9 @@ public:
     // ampbox.xml; vacío = ninguna en especial (la primera ASIO que haya).
     juce::String preferredInterface { "Audient" };
 
-    void saveSettings() const;   // interfaz, canales, teclas... (nada antes de start())
-    void saveState() const;      // lo anterior + estado de los plugins
+    // Interfaz, teclas, BPM, favoritos... (nada antes de start()). Las entradas no se
+    // guardan: siempre se arranca limpio.
+    void saveSettings() const;
 
     static juce::File getDataFolder();
 

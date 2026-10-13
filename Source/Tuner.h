@@ -1,7 +1,8 @@
 #pragma once
 #include "Engine.h"
 
-// Afinador de una entrada: muestra la nota que suena y cuántos cents está desafinada.
+// Afinador de una entrada, estilo Vocal Pitch Monitor: dibuja en el tiempo la nota que
+// suena sobre un piano vertical; arriba, la nota y cuántos cents está desafinada.
 // Lee la entrada limpia (sin amplificador: la distorsión confunde la nota) y la
 // analiza con YIN en el hilo de mensajes.
 class TunerWindow : public juce::DocumentWindow

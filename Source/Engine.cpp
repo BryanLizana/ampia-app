@@ -189,11 +189,6 @@ void Engine::start()
         looper.setWaitForSound (saved->getBoolAttribute ("waitForSound", true));
         presetsHidden = saved->getBoolAttribute ("presetsHidden", false);
         preferredInterface = saved->getStringAttribute ("preferredInterface", preferredInterface);
-        activeGuitar = juce::jlimit (-1, maxChannels - 1, saved->getIntAttribute ("activeGuitar", -1));
-
-        // Hasta la versión 2 la entrada 0 era siempre la guitarra con AmpliTube (fija).
-        // Desde la 3 se arranca vacío: esa entrada vieja no se restaura.
-        const bool fixedGuitar = saved->getIntAttribute ("channelsVersion", 2) < 3;
 
         // Teclas guardadas. Las de antes de la versión 2 (1-9 = presets, F1-F4 = armar)
         // se dejan con los valores nuevos: 1-8 = entradas, Ctrl+1-9 = presets.
@@ -210,52 +205,9 @@ void Engine::start()
                 keys[action] = juce::KeyPress::createFromDescription (k->getStringAttribute ("key"));
             }
         }
-
-        // Los plugins de los canales se abren después (restoreChannelPlugins).
-        if (auto* list = saved->getChildByName ("CHANNELS"))
-        {
-            for (auto* e : list->getChildIterator())
-            {
-                const int i = e->getIntAttribute ("index", -1);
-                if (i < 0 || i >= maxChannels)
-                    continue;
-
-                if (fixedGuitar && i == 0)
-                    continue;
-
-                auto& c = channels[(size_t) i];
-                c.type = typeFromId (e->getStringAttribute ("type"));
-
-                // La entrada PC no se restaura: al arrancar podría captarse a sí misma.
-                if (c.type == ChannelType::Pc)
-                    continue;
-
-                c.name = e->getStringAttribute ("name", c.name);
-                c.input = e->getIntAttribute ("input", c.input);
-                c.midiDevice = e->getStringAttribute ("midi");
-                c.pluginFile = juce::File (e->getStringAttribute ("plugin"));
-                c.armed = e->getBoolAttribute ("armed", c.armed);
-                c.monitor = e->getBoolAttribute ("monitor", true);
-                c.volume = (float) e->getDoubleAttribute ("volume", 1.0);
-                c.shareGroup = c.type == ChannelType::Guitar ? e->getIntAttribute ("shareGroup", -1) : -1;
-                nextShareGroup = juce::jmax (nextShareGroup, c.shareGroup + 1);
-                c.used = true;
-            }
-        }
     }
 
-    // La guitarra activa guardada puede no existir (se quitó la entrada).
-    if (const int a = activeGuitar; ! juce::isPositiveAndBelow (a, maxChannels)
-        || ! channels[(size_t) a].used || channels[(size_t) a].type != ChannelType::Guitar)
-        activeGuitar = firstGuitar();
-
-    // Amplificador compartido: solo una guitarra del grupo lo abre; las otras guardan su preset.
-    for (int i = 0; i < maxChannels; ++i)
-    {
-        auto& c = channels[(size_t) i];
-        if (c.used && c.shareGroup >= 0 && groupLeader (c.shareGroup) != i)
-            channelStateFile (i).loadFileAsData (c.ampState);
-    }
+    // Siempre se arranca limpio: sin entradas ni plugins de la vez anterior.
 
     library.scan();
     library.loadFrom (saved.get());
@@ -514,13 +466,11 @@ void Engine::saveSettings() const
         return;
 
     juce::XmlElement root ("AMPBOX");
-    root.setAttribute ("channelsVersion", 3);
     root.setAttribute ("bpm", looper.getBpm());
     root.setAttribute ("metronome", looper.isMetronomeOn());
     root.setAttribute ("waitForSound", looper.isWaitForSound());
     root.setAttribute ("presetsHidden", presetsHidden);
     root.setAttribute ("preferredInterface", preferredInterface);
-    root.setAttribute ("activeGuitar", activeGuitar.load());
 
     library.saveTo (root);
 
@@ -533,50 +483,10 @@ void Engine::saveSettings() const
         k->setAttribute ("key", key.getTextDescription());
     }
 
-    auto* list = root.createNewChildElement ("CHANNELS");
-    for (int i = 0; i < maxChannels; ++i)
-    {
-        auto& c = channels[(size_t) i];
-        if (! c.used)
-            continue;
-
-        auto* e = list->createNewChildElement ("CHANNEL");
-        e->setAttribute ("index", i);
-        e->setAttribute ("type", typeId (c.type));
-        e->setAttribute ("name", c.name);
-        e->setAttribute ("input", c.input.load());
-        e->setAttribute ("midi", c.midiDevice);
-        e->setAttribute ("plugin", c.pluginFile.getFullPathName());
-        e->setAttribute ("armed", c.armed.load());
-        e->setAttribute ("monitor", c.monitor.load());
-        e->setAttribute ("volume", c.volume.load());
-        e->setAttribute ("shareGroup", c.shareGroup);
-    }
-
     if (auto dev = deviceManager.createStateXml())
         root.addChildElement (dev.release());
 
     root.writeTo (settingsFile());
-}
-
-void Engine::saveState() const
-{
-    saveSettings();
-
-    for (int i = 0; i < maxChannels; ++i)
-    {
-        auto& c = channels[(size_t) i];
-        if (c.used && c.plugin != nullptr)
-        {
-            juce::MemoryBlock state;
-            c.plugin->getStateInformation (state);
-            channelStateFile (i).replaceWithData (state.getData(), state.getSize());
-        }
-        else if (c.used && c.shareGroup >= 0 && c.ampState.getSize() > 0)
-        {
-            channelStateFile (i).replaceWithData (c.ampState.getData(), c.ampState.getSize());
-        }
-    }
 }
 
 std::unique_ptr<juce::AudioPluginInstance> Engine::createPlugin (const juce::File& file, juce::String& error)
@@ -892,53 +802,6 @@ void Engine::clearChannelPlugin (int index)
 
     channelStateFile (index).deleteFile();
     saveSettings();
-}
-
-std::vector<int> Engine::getPendingPlugins() const
-{
-    std::vector<int> pending;
-
-    for (int i = 0; i < maxChannels; ++i)
-    {
-        auto& c = channels[(size_t) i];
-        if (c.used && c.plugin == nullptr && c.pluginFile != juce::File()
-            && (c.shareGroup < 0 || groupLeader (c.shareGroup) == i))
-            pending.push_back (i);
-    }
-
-    return pending;
-}
-
-bool Engine::restoreChannelPlugin (int i)
-{
-    auto& c = channels[(size_t) i];
-    if (! c.used || c.plugin != nullptr || c.pluginFile == juce::File()
-        || (c.shareGroup >= 0 && groupLeader (c.shareGroup) != i))
-        return false;
-
-    const auto file = c.pluginFile;
-    juce::String error;
-    juce::MemoryBlock state;
-    const bool hadState = channelStateFile (i).loadFileAsData (state) && state.getSize() > 0;
-
-    if (! loadChannelPlugin (i, file, error))
-    {
-        c.pluginFailed = true;
-        return false;
-    }
-
-    if (hadState)
-    {
-        // Si se compartió (otra guitarra ya tenía AmpliTube), su preset queda guardado aparte.
-        if (c.plugin != nullptr)
-            c.plugin->setStateInformation (state.getData(), (int) state.getSize());
-        else
-            c.ampState = state;
-
-        channelStateFile (i).replaceWithData (state.getData(), state.getSize());
-    }
-
-    return true;
 }
 
 //==============================================================================
