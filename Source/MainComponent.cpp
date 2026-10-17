@@ -1,12 +1,11 @@
 #include "MainComponent.h"
 #include "DrumKit.h"
 #include "VoiceChain.h"
+#include "Theme.h"
 
 namespace
 {
-    const juce::Colour background (0xff1b1d21), panel (0xff26292f), accent (0xffff8a1f),
-                       recRed (0xffe0393e), playGreen (0xff3fb950),
-                       loopBlue (0xff2f81f7), loopBlueLight (0xff79c0ff);
+    using namespace theme;
 
     // Ventana que muestra la interfaz de AmpliTube.
     class PluginWindow : public juce::DocumentWindow
@@ -60,42 +59,6 @@ namespace
             return f;
 
         return {};
-    }
-
-    // Icono de carpeta (botón de exportados).
-    std::unique_ptr<juce::Drawable> folderIcon (juce::Colour colour)
-    {
-        juce::Path p;
-        p.startNewSubPath (2.0f, 6.0f);
-        p.lineTo (9.0f, 6.0f);
-        p.lineTo (11.0f, 8.5f);
-        p.lineTo (22.0f, 8.5f);
-        p.lineTo (22.0f, 20.0f);
-        p.lineTo (2.0f, 20.0f);
-        p.closeSubPath();
-
-        auto d = std::make_unique<juce::DrawablePath>();
-        d->setPath (p);
-        d->setFill (colour);
-        return d;
-    }
-
-    // Icono de papelera (botón Borrar todo).
-    std::unique_ptr<juce::Drawable> trashIcon (juce::Colour colour)
-    {
-        juce::Path p;
-        p.addRectangle (3.0f, 5.0f, 18.0f, 2.0f);              // tapa
-        p.addRectangle (9.0f, 2.5f, 6.0f, 2.5f);               // asa
-        p.startNewSubPath (5.0f, 8.5f);                        // cuerpo
-        p.lineTo (19.0f, 8.5f);
-        p.lineTo (17.5f, 22.0f);
-        p.lineTo (6.5f, 22.0f);
-        p.closeSubPath();
-
-        auto d = std::make_unique<juce::DrawablePath>();
-        d->setPath (p);
-        d->setFill (colour);
-        return d;
     }
 
     // Plugins VST3 instalados (las carpetas .vst3, sin entrar en ellas).
@@ -152,15 +115,14 @@ public:
         {
             addAndMakeVisible (b);
             noKeyboardFocus (*b);
-            b->setColour (juce::TextButton::buttonOnColourId, accent);
-            b->setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+            toggleStyle (*b);
         }
 
         favButton.onClick = [this] { showFavorites = true; refresh(); };
         allButton.onClick = [this] { showFavorites = false; refresh(); };
 
         addAndMakeVisible (search);
-        search.setTextToShowWhenEmpty ("Buscar en todos los presets...", juce::Colours::grey);
+        search.setTextToShowWhenEmpty ("Buscar en todos los presets...", textMuted);
         search.onTextChange = [this]
         {
             showFavorites = search.isEmpty() && showFavorites;
@@ -218,7 +180,7 @@ public:
         auto& lib = engine.library;
         const bool current = p.path.equalsIgnoreCase (lib.current);
         const bool favorite = lib.isFavorite (p.path);
-        const auto text = current ? juce::Colours::black : juce::Colours::white;
+        const auto ink = current ? onAccent : text;
 
         if (current)
         {
@@ -226,7 +188,7 @@ public:
             g.fillRect (0, 0, w, h);
         }
 
-        g.setColour (favorite ? (current ? juce::Colours::black : accent) : text.withAlpha (0.3f));
+        g.setColour (favorite ? (current ? onAccent : accent) : ink.withAlpha (0.3f));
         g.setFont (juce::FontOptions (18.0f));
         g.drawText (juce::String (juce::CharPointer_UTF8 (favorite ? "\xe2\x98\x85" : "\xe2\x98\x86")),
                     0, 0, starWidth, h, juce::Justification::centred);
@@ -237,16 +199,16 @@ public:
         if (showFavorites)
         {
             g.setFont (juce::FontOptions (13.0f));
-            g.setColour (text.withAlpha (0.5f));
+            g.setColour (ink.withAlpha (0.5f));
             g.drawText (juce::String (row + 1), x, 0, 22, h, juce::Justification::centredLeft);
             x += 24;
         }
 
         g.setFont (juce::FontOptions (15.0f));
-        g.setColour (text);
+        g.setColour (ink);
         g.drawText (p.name, x, 3, w - x - 4, h / 2, juce::Justification::centredLeft, true);
         g.setFont (juce::FontOptions (11.5f));
-        g.setColour (text.withAlpha (0.55f));
+        g.setColour (ink.withAlpha (0.55f));
         g.drawText (p.folder, x, h / 2, w - x - 4, h / 2 - 3, juce::Justification::centredLeft, true);
     }
 
@@ -315,7 +277,6 @@ public:
         addAndMakeVisible (separateButton);
         addChildComponent (voiceButton);
 
-        voiceButton.setColour (juce::TextButton::buttonColourId, accent.withAlpha (0.35f));
         voiceButton.setTooltip ("Cambiar la voz de esta pista (estilo, brillo, reverb...)");
         voiceButton.onClick = [this] { if (onEditVoice) onEditVoice (slot); };
 
@@ -361,9 +322,10 @@ public:
         panSlider.onValueChange = [this] { track.pan = (float) panSlider.getValue(); };
 
         muteButton.setClickingTogglesState (true);
-        muteButton.setColour (juce::TextButton::buttonOnColourId, accent);
+        toggleStyle (muteButton, stopDark, false);
         muteButton.onClick = [this] { track.mute = muteButton.getToggleState(); };
 
+        secondaryStyle (deleteButton);
         deleteButton.setTooltip ("Borrar esta pista");
         deleteButton.onClick = [this] { looper.deleteTrack (slot); };
 
@@ -386,7 +348,7 @@ public:
 
     void tick()
     {
-        level = juce::jmax (track.peak.exchange (0.0f), level * 0.85f);
+        level.push (track.peak.exchange (0.0f));
         repaint (meter);
 
         // Cambios hechos desde el Launchkey (perillas y pads).
@@ -431,21 +393,21 @@ public:
         const bool recording = track.state == Looper::State::Recording;
 
         g.setColour (panel);
-        g.fillRoundedRectangle (getLocalBounds().toFloat(), 4.0f);
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), radius);
+        g.setColour (border);
+        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), radius, 1.0f);
 
         if (recording)
         {
             g.setColour (recRed);
-            g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f, 2.0f);
+            g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), radius, 2.0f);
         }
 
-        g.setColour (background);
-        g.fillRect (meter);
+        // Franja con el color de la entrada de la que se grabó.
+        g.setColour (channelColour (track.source));
+        g.fillRoundedRectangle (getLocalBounds().removeFromLeft (5).toFloat(), 2.0f);
 
-
-        auto db = juce::Decibels::gainToDecibels (level, -60.0f);
-        g.setColour (track.mute ? juce::Colours::grey : playGreen);
-        g.fillRect (meter.withWidth ((int) juce::jmap (db, -60.0f, 0.0f, 0.0f, (float) meter.getWidth())));
+        level.paint (g, meter.toFloat(), ! track.mute);
 
         if (recording)
         {
@@ -465,7 +427,7 @@ public:
 
         // Marca del centro del paneo.
         auto pan = panSlider.getBounds().withTrimmedRight (38);
-        g.setColour (juce::Colours::white.withAlpha (0.35f));
+        g.setColour (text.withAlpha (0.3f));
         g.drawVerticalLine (pan.getCentreX(), (float) pan.getY() + 6.0f, (float) pan.getBottom() - 6.0f);
     }
 
@@ -498,7 +460,7 @@ private:
     juce::TextButton muteButton { "M" }, deleteButton { "X" }, separateButton { "SEPARAR" }, voiceButton { "VOZ" };
     juce::Rectangle<int> meter;
     bool separating = false, voiceRendering = false;
-    float level = 0.0f;
+    theme::Meter level;
 };
 
 //==============================================================================
@@ -529,7 +491,7 @@ public:
             noKeyboardFocus (*c);
 
         armButton.setClickingTogglesState (true);
-        armButton.setColour (juce::TextButton::buttonOnColourId, recRed);
+        toggleStyle (armButton, recRed, false);
         armButton.setTooltip ("Armar: graba esta entrada al pulsar REC");
         armButton.onClick = [this]
         {
@@ -541,7 +503,7 @@ public:
         };
 
         monitorButton.setClickingTogglesState (true);
-        monitorButton.setColour (juce::TextButton::buttonOnColourId, playGreen.withAlpha (0.7f));
+        toggleStyle (monitorButton, playGreen);
         monitorButton.setTooltip ("Escuchar esta entrada en vivo");
         monitorButton.onClick = [this]
         {
@@ -553,12 +515,12 @@ public:
         };
 
         numberLabel.setJustificationType (juce::Justification::centred);
-        numberLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
+        numberLabel.setColour (juce::Label::textColourId, textSecondary);
 
         nameLabel.setEditable (false, true, false);
         nameLabel.addMouseListener (this, false);
         nameLabel.setTooltip ("Doble clic para cambiar el nombre");
-        nameLabel.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+        nameLabel.setFont (heading (17.0f));
         nameLabel.onTextChange = [this]
         {
             auto name = nameLabel.getText().trim();
@@ -592,12 +554,14 @@ public:
         volumeSlider.onValueChange = [this] { channel.volume = (float) volumeSlider.getValue(); };
         volumeSlider.onDragEnd = [this] { engine.saveSettings(); };
 
+        secondaryStyle (pluginButton);
         pluginButton.onClick = [this] { showPluginMenu(); };
         editButton.onClick = [this] { callbacks.openEditor (index); };
         editButton.setTooltip ("Abrir la ventana del plugin");
         tunerButton.onClick = [this] { callbacks.openTuner (index); };
         tunerButton.setTooltip ("Afinador: muestra la nota que tocas o cantas y si estas afinado");
 
+        secondaryStyle (removeButton);
         removeButton.setTooltip ("Quitar esta entrada");
         removeButton.onClick = [this] { callbacks.removed (index); };
     }
@@ -627,7 +591,7 @@ public:
                                     : proc != nullptr ? proc->getName()
                                     : missing ? "(no cargo) " + channel.pluginFile.getFileNameWithoutExtension()
                                     : pending ? "Cargando " + channel.pluginFile.getFileNameWithoutExtension() + "..." : none);
-        pluginButton.setColour (juce::TextButton::textColourOffId, missing ? recRed.brighter (0.4f) : juce::Colours::white);
+        pluginButton.setColour (juce::TextButton::textColourOffId, missing ? recRed : text);
         pluginButton.setTooltip (missing ? "No se pudo cargar " + channel.pluginFile.getFullPathName() + ". Clic para elegir otro"
                                  : channel.type == Engine::ChannelType::Midi ? "Instrumento VST3 (piano, bateria...)"
                                  : guitar ? "Amplificador VST3 / VST2 (AmpliTube, Guitar Rig...)" : "Efecto VST3 opcional");
@@ -702,7 +666,7 @@ public:
 
     void tick()
     {
-        level = juce::jmax (channel.peak.exchange (0.0f), level * 0.85f);
+        level.push (channel.peak.exchange (0.0f));
         repaint (meter.expanded (1));
 
         if (armButton.getToggleState() != channel.armed)   // armado con el teclado
@@ -715,37 +679,35 @@ public:
             volumeSlider.setValue (channel.volume, juce::dontSendNotification);
 
         if (channel.type == Engine::ChannelType::Guitar)
-            repaint (0, 0, 4, getHeight());
+            repaint (0, 0, 10, getHeight());
     }
 
     void paint (juce::Graphics& g) override
     {
         g.setColour (panel);
-        g.fillRoundedRectangle (getLocalBounds().toFloat(), 4.0f);
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), radius);
+        g.setColour (border);
+        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), radius, 1.0f);
 
         if (channel.armed)
         {
             g.setColour (recRed.withAlpha (engine.looper.isRecording() ? 1.0f : 0.5f));
-            g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f, 1.5f);
+            g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), radius, 1.5f);
         }
 
-        // Rack de guitarras: barra naranja en la activa.
-        if (channel.type == Engine::ChannelType::Guitar && engine.countGuitars() > 1 && engine.getActiveGuitar() == index)
-        {
-            g.setColour (accent);
-            g.fillRoundedRectangle (getLocalBounds().removeFromLeft (4).toFloat(), 2.0f);
-        }
+        // Franja con el color de la entrada (el mismo en sus pistas). Rack de guitarras:
+        // la guitarra en uso, con la franja más ancha.
+        const bool activeGuitar = channel.type == Engine::ChannelType::Guitar && engine.countGuitars() > 1
+                                  && engine.getActiveGuitar() == index;
+        g.setColour (channelColour (index));
+        g.fillRoundedRectangle (getLocalBounds().removeFromLeft (activeGuitar ? 9 : 5).toFloat(), 2.0f);
 
-        g.setColour (background);
-        g.fillRect (meter);
-        auto db = juce::Decibels::gainToDecibels (level, -60.0f);
-        g.setColour (level >= 0.99f ? juce::Colours::red : channel.monitor ? accent : juce::Colours::grey);
-        g.fillRect (meter.withWidth ((int) juce::jmap (db, -60.0f, 0.0f, 0.0f, (float) meter.getWidth())));
+        level.paint (g, meter.toFloat(), channel.monitor);
     }
 
     void resized() override
     {
-        auto r = getLocalBounds().reduced (6, 5);
+        auto r = getLocalBounds().withTrimmedLeft (8).reduced (6, 5);
         armButton.setBounds (r.removeFromLeft (38));
         numberLabel.setBounds (r.removeFromLeft (24));
         auto names = r.removeFromLeft (140);
@@ -937,7 +899,7 @@ private:
     juce::StringArray midiIds;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Rectangle<int> meter;
-    float level = 0.0f;
+    theme::Meter level;
     int number = 0;
 };
 
@@ -957,6 +919,7 @@ public:
             auto* button = buttons.add (new juce::TextButton());
             addAndMakeVisible (button);
             noKeyboardFocus (*button);
+            secondaryStyle (*button);
             button->onClick = [this, id = action.id, button]
             {
                 waitingFor = id;
@@ -1054,7 +1017,8 @@ MainComponent::MainComponent()
 {
     for (auto* c : std::initializer_list<juce::Component*> { &audioButton, &reloadButton, &recButton,
                                                              &playButton, &undoButton, &redoButton, &clearButton,
-                                                             &metroButton, &keysButton, &waitButton, &tapButton })
+                                                             &metroButton, &keysButton, &waitButton, &tapButton,
+                                                             &bpmDownButton, &bpmUpButton })
     {
         addAndMakeVisible (c);
         noKeyboardFocus (*c);
@@ -1062,8 +1026,21 @@ MainComponent::MainComponent()
 
     addAndMakeVisible (statusLabel);
     addAndMakeVisible (pluginLabel);
-    addAndMakeVisible (helpLabel);
     addAndMakeVisible (bpmLabel);
+
+    setIcon (reloadButton, icons::reload());
+    setIcon (recButton, icons::record(), true);
+    setIcon (playButton, icons::play(), true);
+    setIcon (undoButton, icons::undo());
+    setIcon (redoButton, icons::redo());
+    setIcon (clearButton, icons::trash());
+    setIcon (folderButton, icons::folder());
+    setIcon (bpmDownButton, icons::minus());
+    setIcon (bpmUpButton, icons::plus());
+    secondaryStyle (clearButton);
+    secondaryStyle (folderButton);
+    bpmDownButton.onClick = [this] { performAction ("tempoDown"); };
+    bpmUpButton.onClick = [this] { performAction ("tempoUp"); };
 
     audioButton.onClick = [this] { showAudioSettings(); };
     reloadButton.onClick = [this]
@@ -1078,29 +1055,24 @@ MainComponent::MainComponent()
     playButton.onClick = [this] { engine.looper.togglePlay(); };
     undoButton.onClick = [this] { performAction ("undo"); };
     redoButton.onClick = [this] { performAction ("redo"); };
-    undoButton.setTooltip ("Deshacer");
-    redoButton.setTooltip ("Rehacer");
     clearButton.onClick = [this] { performAction ("clear"); };
-    clearButton.setTooltip ("Borrar todo el loop (Supr)");
-    clearButton.setImages (trashIcon (juce::Colours::white.withAlpha (0.85f)).get(), trashIcon (recRed).get());
     metroButton.onClick = [this] { performAction ("metro"); };
     tapButton.onClick = [this] { performAction ("tap"); };
     tapButton.setTriggeredOnMouseDown (true);   // al presionar: al soltar el tiempo sale corrido
-    tapButton.setTooltip ("Toca al ritmo (3 o 4 veces) para fijar el tempo (tecla T)");
     keysButton.onClick = [this] { showKeySettings(); };
+    keysButton.setTooltip ("Ver y cambiar los atajos de teclado");
 
-    metroButton.setColour (juce::TextButton::buttonOnColourId, accent);
-    waitButton.setColour (juce::TextButton::buttonOnColourId, accent);
+    toggleStyle (metroButton, tempoPurple);
+    toggleStyle (waitButton, recRed);
     waitButton.setTooltip ("Encendido: REC espera y la toma empieza con la primera nota. "
                            "Apagado (o con metronomo): graba en cuanto pulsas REC");
     waitButton.onClick = [this] { performAction ("wait"); };
-    bpmLabel.setFont (juce::FontOptions (22.0f, juce::Font::bold));
+    bpmLabel.setFont (heading (24.0f));
     bpmLabel.setJustificationType (juce::Justification::centred);
-    bpmLabel.setInterceptsMouseClicks (false, false);
+    bpmLabel.setInterceptsMouseClicks (false, false);   // el arrastre lo maneja la ventana
 
-    helpLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    helpLabel.setFont (juce::FontOptions (13.0f));
-    statusLabel.setFont (juce::FontOptions (13.5f));
+    statusLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    statusLabel.setMinimumHorizontalScale (1.0f);
 
     pluginLabel.setColour (juce::Label::textColourId, accent);
 
@@ -1120,7 +1092,7 @@ MainComponent::MainComponent()
         engine.saveSettings();
         resized();
     };
-    presetTitle.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+    presetTitle.setFont (heading (19.0f));
     refreshPresetTitle();
     presetTitle.setColour (juce::Label::textColourId, accent);
 
@@ -1141,9 +1113,7 @@ MainComponent::MainComponent()
     exportButton.onClick = [this] { showExportMenu(); };
     folderButton.onClick = [] { exportFolder().createDirectory(); exportFolder().startAsProcess(); };
     folderButton.setTooltip ("Abrir la carpeta de exportados");
-    folderButton.setImages (folderIcon (juce::Colours::white.withAlpha (0.8f)).get(),
-                            folderIcon (accent).get());
-    exportLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.7f));
+    exportLabel.setColour (juce::Label::textColourId, textSecondary);
 
     for (int i = 0; i < Looper::maxTracks; ++i)
     {
@@ -1155,14 +1125,20 @@ MainComponent::MainComponent()
 
     // Entradas: una fila por canal usado.
     addAndMakeVisible (channelsTitle);
-    channelsTitle.setFont (juce::FontOptions (16.0f, juce::Font::bold));
-    channelsTitle.setColour (juce::Label::textColourId, accent);
+    channelsTitle.setFont (heading (20.0f));
+    channelsTitle.setColour (juce::Label::textColourId, text);
 
     for (auto* b : { &addGuitarButton, &addAudioButton, &addMidiButton, &addPcButton })
     {
         addAndMakeVisible (b);
         noKeyboardFocus (*b);
     }
+
+    for (auto* b : { &addGuitarButton, &addAudioButton, &addMidiButton, &addPcButton })
+        primaryStyle (*b);
+
+    primaryStyle (playButton, playGreen);
+    primaryStyle (exportButton, fileBlue);
 
     addAudioButton.setTooltip ("Nueva entrada de audio (voz, microfono, linea)");
     addMidiButton.setTooltip ("Nueva entrada MIDI (teclado o bateria) con un instrumento VST3");
@@ -1665,17 +1641,34 @@ void MainComponent::tapTempo()
 
 void MainComponent::refreshHelp()
 {
-    juce::StringArray parts;
-
-    for (auto& a : Engine::getKeyActions())
+    // Los atajos van en el tooltip de cada botón (la lista completa, en Teclas...).
+    const auto hint = [this] (const juce::String& id)
     {
-        auto key = engine.keys[a.id];
-        if (key.isValid())
-            parts.add (key.getTextDescription() + ": " + a.name);
-    }
+        auto key = engine.keys[id];
+        if (! key.isValid())
+            return juce::String();
 
-    helpLabel.setText (parts.joinIntoString ("   |   ") + "   |   Rueda del mouse: tempo   |   Clic en la barra del loop: ir a esa parte",
-                       juce::dontSendNotification);
+        auto name = key.getTextDescription();
+        using Name = std::pair<const char*, const char*>;
+        for (auto [from, to] : { Name { "spacebar", "Espacio" }, Name { "return", "Enter" }, Name { "cursor left", "flecha izquierda" },
+                                 Name { "cursor right", "flecha derecha" }, Name { "cursor up", "flecha arriba" },
+                                 Name { "cursor down", "flecha abajo" }, Name { "delete", "Supr" }, Name { "tab", "Tab" } })
+            if (name == from)
+                name = to;
+
+        return "  (" + (name.length() == 1 ? name.toUpperCase() : name) + ")";
+    };
+
+    recButton.setTooltip ("Grabar / terminar toma" + hint ("rec"));
+    playButton.setTooltip ("Reproducir / parar" + hint ("play"));
+    undoButton.setTooltip ("Deshacer" + hint ("undo"));
+    redoButton.setTooltip ("Rehacer" + hint ("redo"));
+    clearButton.setTooltip ("Borrar todo el loop" + hint ("clear"));
+    metroButton.setTooltip ("Metronomo" + hint ("metro"));
+    tapButton.setTooltip ("Toca al ritmo (3 o 4 veces) para fijar el tempo" + hint ("tap"));
+    bpmDownButton.setTooltip ("Tempo -1" + hint ("tempoDown"));
+    bpmUpButton.setTooltip ("Tempo +1" + hint ("tempoUp"));
+    bpmLabel.setTooltip ("Tempo: arrastra arriba / abajo, usa - / + o la rueda del mouse");
 }
 
 void MainComponent::refreshInputs()
@@ -1689,17 +1682,26 @@ void MainComponent::refreshStatus()
 {
     auto* device = engine.deviceManager.getCurrentAudioDevice();
 
+    statusChips.clear();
+
     if (device == nullptr)
     {
         statusLabel.setText ("Sin interfaz de audio", juce::dontSendNotification);
+        repaint (chipsArea);
         return;
     }
 
-    statusLabel.setText (engine.deviceManager.getCurrentAudioDeviceType() + " - " + device->getName()
-                           + "\n" + juce::String (device->getCurrentSampleRate(), 0) + " Hz, buffer "
-                           + juce::String (device->getCurrentBufferSizeSamples())
-                           + "  |  latencia " + juce::String (engine.getLatencyMs(), 1) + " ms",
-                         juce::dontSendNotification);
+    statusLabel.setText (device->getName(), juce::dontSendNotification);
+    statusLabel.setTooltip (engine.deviceManager.getCurrentAudioDeviceType() + " - " + device->getName());
+
+    // Latencia: verde se toca cómodo, ámbar se nota, roja molesta.
+    const double latency = engine.getLatencyMs();
+    latencyColour = latency <= 12.0 ? playGreen : latency <= 25.0 ? amber : recRed;
+    statusChips.add (engine.deviceManager.getCurrentAudioDeviceType());
+    statusChips.add (juce::String (device->getCurrentSampleRate() / 1000.0, 1).replace (".0", "") + " kHz");
+    statusChips.add ("buffer " + juce::String (device->getCurrentBufferSizeSamples()));
+    statusChips.add ("latencia " + juce::String (latency, 1) + " ms");
+    repaint (chipsArea);
 }
 
 void MainComponent::refreshTransport()
@@ -1712,20 +1714,19 @@ void MainComponent::refreshTransport()
                                      : recording ? "TERMINAR TOMA"
                                      : engine.countArmed() == 0 ? "ARMA UNA ENTRADA"
                                      : looper.hasFreeTrack (engine.countArmed()) ? "REC" : "SIN PISTAS");
-    recButton.setColour (juce::TextButton::buttonColourId,
-                         recording ? recRed
-                         : waiting ? (juce::Time::getMillisecondCounter() % 600 < 300 ? recRed : recRed.withAlpha (0.35f))
-                                   : recRed.withAlpha (0.35f));
+    const bool recFull = recording || (waiting && juce::Time::getMillisecondCounter() % 600 < 300);
+    recButton.setColour (juce::TextButton::buttonColourId, recFull ? recRed : recRed.interpolatedWith (panel, 0.88f));
+    recButton.setColour (juce::TextButton::textColourOffId, recFull ? onAccent : recRed);
 
     metroButton.setToggleState (looper.isMetronomeOn(), juce::dontSendNotification);
     waitButton.setToggleState (looper.isWaitForSound(), juce::dontSendNotification);
     bpmLabel.setText (juce::String (juce::roundToInt (looper.getBpm())) + " BPM", juce::dontSendNotification);
-    bpmLabel.setColour (juce::Label::textColourId, looper.isTempoLocked() ? juce::Colours::white.withAlpha (0.5f)
-                                                                          : juce::Colours::white);
+    bpmLabel.setColour (juce::Label::textColourId, looper.isTempoLocked() ? textSecondary : text);
 
     const bool playing = looper.isPlaying();
     playButton.setButtonText (playing ? "STOP" : "PLAY");
-    playButton.setColour (juce::TextButton::buttonColourId, playing ? playGreen.withAlpha (0.6f) : panel);
+    setIcon (playButton, playing ? icons::stop() : icons::play(), true);
+    playButton.setColour (juce::TextButton::buttonColourId, playing ? stopDark : playGreen);
 }
 
 void MainComponent::refreshTracks()
@@ -2308,8 +2309,8 @@ void MainComponent::timerCallback()
             row->tick();
 
     // Caída suave de los medidores.
-    inLevel = juce::jmax (engine.takeInputPeak(), inLevel * 0.85f);
-    outLevel = juce::jmax (engine.takeOutputPeak(), outLevel * 0.85f);
+    inLevel.push (engine.takeInputPeak());
+    outLevel.push (engine.takeOutputPeak());
 
     refreshTransport();
     refreshTracks();
@@ -2342,7 +2343,9 @@ void MainComponent::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWh
 void MainComponent::mouseMove (const juce::MouseEvent& e)
 {
     const bool overBar = loopBar.contains (e.getPosition()) && engine.looper.getLoopSeconds() > 0.0;
-    setMouseCursor (overBar ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+    setMouseCursor (overBar ? juce::MouseCursor::PointingHandCursor
+                    : bpmLabel.getBounds().contains (e.getPosition()) ? juce::MouseCursor::UpDownResizeCursor
+                                                                      : juce::MouseCursor::NormalCursor);
 }
 
 void MainComponent::mouseDown (const juce::MouseEvent& e)
@@ -2350,17 +2353,32 @@ void MainComponent::mouseDown (const juce::MouseEvent& e)
     seeking = loopBar.contains (e.getPosition()) && engine.looper.getLoopSeconds() > 0.0;
     if (seeking)
         seekTo (e);
+
+    draggingBpm = bpmLabel.getBounds().contains (e.getPosition());
+    dragStartBpm = std::round (engine.looper.getBpm());
 }
 
 void MainComponent::mouseDrag (const juce::MouseEvent& e)
 {
     if (seeking)
         seekTo (e);
+
+    // 1 BPM cada 4 px; arriba sube.
+    if (draggingBpm)
+    {
+        const float target = dragStartBpm - std::round ((float) e.getDistanceFromDragStartY() / 4.0f);
+        if (target != std::round (engine.looper.getBpm()))
+            changeBpm (target - std::round (engine.looper.getBpm()));
+    }
 }
 
 void MainComponent::mouseUp (const juce::MouseEvent&)
 {
+    if (draggingBpm)
+        engine.saveSettings();
+
     seeking = false;
+    draggingBpm = false;
 }
 
 void MainComponent::seekTo (const juce::MouseEvent& e)
@@ -2406,14 +2424,14 @@ void MainComponent::paintOverChildren (juce::Graphics& g)
     g.strokePath (glass, juce::PathStrokeType (2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     g.fillRect (icon.withTop (icon.getBottom() - 10.0f).reduced (8.0f, 2.0f));
 
-    auto text = card.reduced (0.0f, 22.0f).withTrimmedRight (20.0f);
-    g.setColour (juce::Colours::white);
-    g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
-    g.drawText (loadingTitle + "...", text.removeFromTop (30.0f), juce::Justification::centredLeft, true);
-    g.setColour (juce::Colours::white.withAlpha (0.65f));
+    auto area = card.reduced (0.0f, 22.0f).withTrimmedRight (20.0f);
+    g.setColour (text);
+    g.setFont (heading (22.0f));
+    g.drawText (loadingTitle + "...", area.removeFromTop (30.0f), juce::Justification::centredLeft, true);
+    g.setColour (textSecondary);
     g.setFont (juce::FontOptions (13.5f));
     g.drawFittedText (loadingDetail + "\nSi Windows dice \"No responde\", es normal: espera.",
-                      text.toNearestInt(), juce::Justification::topLeft, 4);
+                      area.toNearestInt(), juce::Justification::topLeft, 4);
 }
 
 // Marco naranja en la zona que maneja el Launchkey (ENTRADAS o LOOPS).
@@ -2447,7 +2465,7 @@ void MainComponent::paintLaunchkeyFrame (juce::Graphics& g)
     g.drawRoundedRectangle (box, 6.0f, 2.0f);
 
     const char* names[] = { "LAUNCHKEY: LOOPS", "LAUNCHKEY: ENTRADAS", "LAUNCHKEY: CONFIGURAR", "LAUNCHKEY: AGREGAR" };
-    const juce::String text = juce::String (names[dawPage])
+    const juce::String label = juce::String (names[dawPage])
                               + (dawPan ? " (PANEO)" : "");
     g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
     auto tag = juce::Rectangle<float> (box.getRight() - 190.0f, box.getBottom() - 8.0f, 180.0f, 16.0f);
@@ -2455,39 +2473,100 @@ void MainComponent::paintLaunchkeyFrame (juce::Graphics& g)
         tag = tag.withY (box.getBottom() + 2.0f);
     g.setColour (accent);
     g.fillRoundedRectangle (tag, 4.0f);
-    g.setColour (juce::Colours::black);
-    g.drawText (text, tag, juce::Justification::centred);
+    g.setColour (onAccent);
+    g.drawText (label, tag, juce::Justification::centred);
 }
 
 void MainComponent::paint (juce::Graphics& g)
 {
     g.fillAll (background);
 
-    auto drawMeter = [&] (juce::Rectangle<int> r, float level, const juce::String& name)
-    {
-        g.setColour (panel);
-        g.fillRect (r);
-        auto db = juce::Decibels::gainToDecibels (level, -60.0f);
-        auto w = juce::jmap (db, -60.0f, 0.0f, 0.0f, (float) r.getWidth());
-        g.setColour (level >= 0.99f ? juce::Colours::red : accent);
-        g.fillRect (r.withWidth ((int) w));
-        g.setColour (juce::Colours::white.withAlpha (0.7f));
-        g.drawText (name, r.reduced (6, 0), juce::Justification::centredLeft);
-    };
+    // Tarjeta del looper: grabar, tempo, exportar y la barra del loop van juntos.
+    g.setColour (panel);
+    g.fillRoundedRectangle (transportCard.toFloat(), 12.0f);
+    g.setColour (border);
+    g.drawRoundedRectangle (transportCard.toFloat().reduced (0.5f), 12.0f, 1.0f);
 
-    drawMeter (inMeter, inLevel, "IN");
-    drawMeter (outMeter, outLevel, "OUT");
+    g.setColour (text);
+    g.setFont (heading (19.0f));
+    g.drawText ("Looper", looperTitle, juce::Justification::centredLeft);
+
+    g.setColour (border);
+    for (auto& d : dividers)
+        g.fillRect (d);
+
+    // Tempo: los BPM y sus - / + en una caja, como un campo que se edita.
+    g.setColour (panel);
+    g.fillRoundedRectangle (bpmBox.toFloat().reduced (0.5f), radius);
+    g.setColour (controlEdge);
+    g.drawRoundedRectangle (bpmBox.toFloat().reduced (0.5f), radius, 1.0f);
+
+    // Estado del audio en chips; la latencia con color.
+    {
+        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        auto area = chipsArea;
+
+        for (int i = 0; i < statusChips.size(); ++i)
+        {
+            const bool latency = i == statusChips.size() - 1;
+            const auto& chipText = statusChips[i];
+            const int w = (int) juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), chipText) + (latency ? 30 : 18);
+            if (w > area.getWidth())
+                break;
+
+            auto chip = area.removeFromLeft (w).withSizeKeepingCentre (w, 18).toFloat();
+            area.removeFromLeft (6);
+            g.setColour (latency ? latencyColour.withAlpha (0.15f) : trough);
+            g.fillRoundedRectangle (chip, 9.0f);
+            g.setColour (latency ? latencyColour.darker (0.35f) : textSecondary);
+
+            if (latency)
+            {
+                g.setColour (latencyColour);
+                g.fillEllipse (chip.getX() + 9.0f, chip.getCentreY() - 3.0f, 6.0f, 6.0f);
+                g.setColour (latencyColour.darker (0.35f));
+                chip.removeFromLeft (12.0f);
+            }
+
+            g.drawText (chipText, chip, juce::Justification::centred);
+        }
+    }
+
+    inLevel.paint (g, inMeter.toFloat(), true, "IN");
+    outLevel.paint (g, outMeter.toFloat(), true, "OUT");
+
+    // Pistas: mientras no hay ninguna, decir dónde van a aparecer.
+    if (std::none_of (rows.begin(), rows.end(), [] (auto& row) { return row->isVisible(); }) && tracksArea.getHeight() > 40)
+    {
+        const auto box = tracksArea.withHeight (juce::jmin (tracksArea.getHeight(), 84)).toFloat().reduced (0.5f);
+        juce::Path outline, dashed;
+        outline.addRoundedRectangle (box, radius + 2.0f);
+        const float dashes[] = { 6.0f, 4.0f };
+        juce::PathStrokeType (1.2f).createDashedStroke (dashed, outline, dashes, 2);
+        g.setColour (controlEdge);
+        g.fillPath (dashed);
+
+        auto inner = box.toNearestInt();
+        g.setColour (textSecondary);
+        g.setFont (heading (16.0f));
+        g.drawText ("Las pistas que grabes apareceran aqui", inner.removeFromTop (inner.getHeight() / 2 + 2),
+                    juce::Justification::centredBottom);
+        g.setColour (textMuted);
+        g.setFont (juce::FontOptions (12.5f));
+        g.drawText ("Arma una entrada (el boton del circulo) y pulsa REC",
+                    inner.withTrimmedTop (4), juce::Justification::centredTop);
+    }
 
     // Sin entradas: explicar cómo empezar.
     if (! emptyHint.isEmpty())
     {
         const auto box = emptyHint.toFloat();
-        g.setColour (juce::Colours::white.withAlpha (0.25f));
+        g.setColour (textMuted);
         g.drawRoundedRectangle (box.reduced (1.0f), 6.0f, 1.0f);
-        g.setColour (juce::Colours::white.withAlpha (0.75f));
-        g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        g.setColour (text);
+        g.setFont (heading (18.0f));
         g.drawText ("Sin entradas", emptyHint.withTrimmedBottom (emptyHint.getHeight() / 2), juce::Justification::centredBottom);
-        g.setColour (juce::Colours::white.withAlpha (0.5f));
+        g.setColour (textSecondary);
         g.setFont (juce::FontOptions (13.0f));
         g.drawText ("Agrega lo que vas a tocar con + GUITARRA, + AUDIO, + MIDI o + PC (arriba a la derecha)",
                     emptyHint.withTrimmedTop (emptyHint.getHeight() / 2 + 4), juce::Justification::centredTop);
@@ -2497,8 +2576,10 @@ void MainComponent::paint (juce::Graphics& g)
     auto& looper = engine.looper;
     // Barra del loop en azul (el verde es de medidores y Play), con pulsos y cursor.
     const auto bar = loopBar.toFloat();
-    g.setColour (panel);
+    g.setColour (trough);
     g.fillRoundedRectangle (bar, 5.0f);
+    g.setColour (controlEdge);
+    g.drawRoundedRectangle (bar.reduced (0.5f), 5.0f, 1.0f);
 
     if (looper.getLoopSeconds() > 0.0)
     {
@@ -2524,7 +2605,7 @@ void MainComponent::paint (juce::Graphics& g)
             {
                 const bool barLine = b % Looper::beatsPerBar == 0;
                 const float bx = bar.getX() + bar.getWidth() * (float) b / (float) numBeats;
-                g.setColour (juce::Colours::white.withAlpha (barLine ? 0.45f : 0.15f));
+                g.setColour (text.withAlpha (barLine ? 0.35f : 0.12f));
                 g.fillRect (bx, bar.getY() + (barLine ? 2.0f : 7.0f), barLine ? 2.0f : 1.0f,
                             bar.getHeight() - (barLine ? 4.0f : 14.0f));
             }
@@ -2533,25 +2614,43 @@ void MainComponent::paint (juce::Graphics& g)
         // Cursor: línea clara con brillo.
         g.setColour (light.withAlpha (0.35f));
         g.fillRect (x - 4.0f, bar.getY(), 8.0f, bar.getHeight());
-        g.setColour (juce::Colours::white);
+        g.setColour (dark.darker (0.3f));
         g.fillRect (x - 1.0f, bar.getY(), 3.0f, bar.getHeight());
 
         g.setColour (light.withAlpha (0.9f));
         g.drawRoundedRectangle (bar.reduced (0.5f), 5.0f, 1.0f);
 
-        g.setColour (juce::Colours::white);
+        // Textos: blancos sobre lo ya recorrido, oscuros sobre el gris.
         g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
-        g.drawText ("LOOP  " + juce::String (looper.getLoopSeconds(), 2) + " s", loopBar.reduced (10, 0),
-                    juce::Justification::centredLeft);
-        if (beatNow >= 0)
-            g.drawText ("Compás " + juce::String (beatNow / Looper::beatsPerBar + 1) + "/"
-                            + juce::String ((numBeats + Looper::beatsPerBar - 1) / Looper::beatsPerBar)
-                            + "   Pulso " + juce::String (beatNow % Looper::beatsPerBar + 1),
-                        loopBar.reduced (10, 0), juce::Justification::centredRight);
+        for (const bool played : { true, false })
+        {
+            juce::Graphics::ScopedSaveState clip (g);
+            g.reduceClipRegion (played ? loopBar.withRight ((int) x) : loopBar.withLeft ((int) x));
+            g.setColour (played ? onAccent : text);
+            g.drawText ("LOOP  " + juce::String (looper.getLoopSeconds(), 2) + " s", loopBar.reduced (10, 0),
+                        juce::Justification::centredLeft);
+            if (beatNow >= 0)
+                g.drawText ("Compás " + juce::String (beatNow / Looper::beatsPerBar + 1) + "/"
+                                + juce::String ((numBeats + Looper::beatsPerBar - 1) / Looper::beatsPerBar)
+                                + "   Pulso " + juce::String (beatNow % Looper::beatsPerBar + 1),
+                            loopBar.reduced (10, 0), juce::Justification::centredRight);
+        }
     }
     else
     {
-        g.setColour (juce::Colours::white.withAlpha (0.6f));
+        // Sin loop: regla de 4 compases al tempo actual (marcas arriba y abajo, el texto al medio).
+        const int beats = 4 * Looper::beatsPerBar;
+        for (int b = 1; b < beats; ++b)
+        {
+            const bool barLine = b % Looper::beatsPerBar == 0;
+            const float bx = bar.getX() + bar.getWidth() * (float) b / (float) beats;
+            const float len = barLine ? 8.0f : 4.0f;
+            g.setColour (text.withAlpha (barLine ? 0.3f : 0.15f));
+            g.fillRect (bx, bar.getY() + 1.0f, 1.0f, len);
+            g.fillRect (bx, bar.getBottom() - 1.0f - len, 1.0f, len);
+        }
+
+        g.setColour (textSecondary);
         g.drawText (looper.isRecording() ? "Grabando la toma base..." : "Sin loop: la primera toma fija el largo",
                     loopBar.reduced (8, 0), juce::Justification::centredLeft);
     }
@@ -2567,23 +2666,23 @@ void MainComponent::resized()
     for (auto* c : std::initializer_list<juce::Component*> { presetPanel.get(), &presetTitle, &presetsToggle })
         c->setVisible (false);
 
-    auto top = r.removeFromTop (34);
-    audioButton.setBounds (top.removeFromLeft (110));
+    // Arriba: audio, estado (nombre y chips) y los medidores IN / OUT a la derecha.
+    auto top = r.removeFromTop (38);
+    audioButton.setBounds (top.removeFromLeft (110).withSizeKeepingCentre (110, 34));
     top.removeFromLeft (8);
-    reloadButton.setBounds (top.removeFromLeft (40));
-    top.removeFromLeft (16);
-    pluginLabel.setBounds (top.removeFromRight (360));
-    statusLabel.setBounds (top);
-
-    r.removeFromTop (10);
-
-    auto meters = r.removeFromTop (14);
-    inMeter = meters.removeFromLeft (meters.getWidth() / 2 - 4);
-    meters.removeFromLeft (8);
-    outMeter = meters;
+    reloadButton.setBounds (top.removeFromLeft (40).withSizeKeepingCentre (40, 34));
+    top.removeFromLeft (14);
+    auto meters = top.removeFromRight (320);
+    inMeter = meters.removeFromTop (18);
+    meters.removeFromTop (2);
+    outMeter = meters.removeFromTop (18);
+    top.removeFromRight (14);
+    pluginLabel.setBounds ({});
+    statusLabel.setBounds (top.removeFromTop (18).withTrimmedLeft (-4));
+    chipsArea = top.withTrimmedTop (1);
 
     // Entradas
-    r.removeFromTop (8);
+    r.removeFromTop (12);
     auto channelsHeader = r.removeFromTop (30);
     channelsTitle.setBounds (channelsHeader.removeFromLeft (120));
     addPcButton.setBounds (channelsHeader.removeFromRight (80));
@@ -2611,44 +2710,64 @@ void MainComponent::resized()
         r.removeFromTop (4);
     }
 
-    r.removeFromTop (8);
-    auto transport = r.removeFromTop (46);
-    recButton.setBounds (transport.removeFromLeft (190));
-    transport.removeFromLeft (8);
-    playButton.setBounds (transport.removeFromLeft (130));
-    transport.removeFromLeft (8);
-    undoButton.setBounds (transport.removeFromLeft (70));
-    transport.removeFromLeft (6);
-    redoButton.setBounds (transport.removeFromLeft (70));
-    transport.removeFromLeft (8);
-    waitButton.setBounds (transport.removeFromLeft (150));
-    transport.removeFromLeft (8);
-    clearButton.setBounds (transport.removeFromLeft (54));
+    // Looper: una tarjeta con grupos separados por líneas finas.
+    r.removeFromTop (10);
+    transportCard = r.removeFromTop (12 + 26 + 6 + 46 + 10 + 34 + 10 + 30 + 14);
+    auto card = transportCard.reduced (14, 12);
+    looperTitle = card.removeFromTop (26);
+    card.removeFromTop (6);
+    dividers.clear();
+    const auto divider = [this] (juce::Rectangle<int>& row, int gap)
+    {
+        row.removeFromLeft (gap);
+        dividers.add ({ row.getX(), row.getY() + 6, 1, row.getHeight() - 12 });
+        row.removeFromLeft (gap + 1);
+    };
 
-    // Tempo y exportar en una fila.
-    r.removeFromTop (8);
-    auto tempo = r.removeFromTop (34);
-    metroButton.setBounds (tempo.removeFromLeft (130));
-    tempo.removeFromLeft (4);
-    bpmLabel.setBounds (tempo.removeFromLeft (90));
-    tapButton.setBounds (tempo.removeFromLeft (56));
-    tempo.removeFromLeft (12);
+    // Grabar (lo más grande) y su modo; Play; a la derecha deshacer / rehacer y borrar.
+    auto transport = card.removeFromTop (46);
+    recButton.setBounds (transport.removeFromLeft (220));
+    transport.removeFromLeft (8);
+    waitButton.setBounds (transport.removeFromLeft (150).reduced (0, 5));
+    divider (transport, 14);
+    playButton.setBounds (transport.removeFromLeft (150));
+    clearButton.setBounds (transport.removeFromRight (46).reduced (0, 5));
+    transport.removeFromRight (14);
+    dividers.add ({ transport.getRight(), transport.getY() + 6, 1, transport.getHeight() - 12 });
+    transport.removeFromRight (15);
+    redoButton.setBounds (transport.removeFromRight (46).reduced (0, 5));
+    transport.removeFromRight (6);
+    undoButton.setBounds (transport.removeFromRight (46).reduced (0, 5));
+
+    // Tempo | exportar ... teclas.
+    card.removeFromTop (10);
+    auto tempo = card.removeFromTop (34);
+    metroButton.setBounds (tempo.removeFromLeft (140));
+    tempo.removeFromLeft (8);
+    bpmBox = tempo.removeFromLeft (170);
+    {
+        auto box = bpmBox.reduced (3);
+        bpmDownButton.setBounds (box.removeFromLeft (30));
+        bpmUpButton.setBounds (box.removeFromRight (30));
+        bpmLabel.setBounds (box);
+    }
+    tempo.removeFromLeft (8);
+    tapButton.setBounds (tempo.removeFromLeft (60));
+    divider (tempo, 14);
     keysButton.setBounds (tempo.removeFromRight (100));
     tempo.removeFromRight (8);
     loopsBox.setBounds (tempo.removeFromLeft (115));
     tempo.removeFromLeft (6);
-    exportButton.setBounds (tempo.removeFromLeft (145));
+    exportButton.setBounds (tempo.removeFromLeft (150));
     tempo.removeFromLeft (6);
-    folderButton.setBounds (tempo.removeFromLeft (38).reduced (2));
-    tempo.removeFromLeft (8);
+    folderButton.setBounds (tempo.removeFromLeft (40));
+    tempo.removeFromLeft (10);
     exportLabel.setBounds (tempo);
 
-    r.removeFromTop (8);
-    loopBar = r.removeFromTop (30);
+    card.removeFromTop (10);
+    loopBar = card.removeFromTop (30);
 
-    helpLabel.setBounds (r.removeFromBottom (34));
-
-    r.removeFromTop (6);
+    r.removeFromTop (12);
     tracksArea = r;
     layoutTracks();
 }

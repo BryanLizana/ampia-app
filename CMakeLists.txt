@@ -31,6 +31,7 @@ target_sources(AmpBox PRIVATE
     Source/VoiceTracks.cpp
     Source/Tuner.cpp
     Source/Crash.cpp
+    Source/Theme.cpp
     Source/MainComponent.cpp)
 
 target_compile_definitions(AmpBox PRIVATE
@@ -66,8 +67,15 @@ if(MSVC)
     target_link_options(AmpBox PRIVATE /DEBUG /OPT:REF /OPT:ICF)
 endif()
 
+# Fuentes incrustadas (licencia OFL): Inter para la interfaz, Source Serif 4 para títulos.
+juce_add_binary_data(AmpBoxFonts SOURCES
+    resources/fonts/Inter-400.ttf
+    resources/fonts/Inter-600.ttf
+    resources/fonts/SourceSerif4-600.ttf)
+
 target_link_libraries(AmpBox
     PRIVATE
+        AmpBoxFonts
         juce::juce_audio_utils
         juce::juce_audio_processors
     PUBLIC

@@ -1,4 +1,5 @@
 #include "DrumKit.h"
+#include "Theme.h"
 
 namespace
 {
@@ -316,7 +317,7 @@ namespace
 
             addAndMakeVisible (folderLabel);
             folderLabel.setFont (juce::FontOptions (11.0f));
-            folderLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
+            folderLabel.setColour (juce::Label::textColourId, theme::textSecondary);
 
             for (int pad = 0; pad < DrumKit::numPads; ++pad)
                 addAndMakeVisible (padLabels.add (new juce::Label()));
@@ -327,9 +328,9 @@ namespace
 
         void paint (juce::Graphics& g) override
         {
-            g.fillAll (juce::Colour (0xff1b1d21));
-            g.setColour (juce::Colour (0xffff8a1f));
-            g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+            g.fillAll (theme::background);
+            g.setColour (theme::accent);
+            g.setFont (theme::heading (20.0f));
             g.drawText ("BATERIA AMPBOX", 16, 10, getWidth() - 32, 24, juce::Justification::centredLeft);
         }
 
@@ -360,7 +361,7 @@ namespace
                                            + ":   " + (sample.isEmpty() ? juce::String ("(falta)") : sample),
                                          juce::dontSendNotification);
                 padLabels[pad]->setColour (juce::Label::textColourId,
-                                           sample.isEmpty() ? juce::Colours::red : juce::Colours::white);
+                                           sample.isEmpty() ? theme::recRed : theme::text);
             }
         }
 

@@ -2,6 +2,7 @@
 #include "Engine.h"
 #include "VoiceTracks.h"
 #include "Tuner.h"
+#include "Theme.h"
 
 class TrackRow;
 class ChannelRow;
@@ -71,36 +72,37 @@ private:
     juce::TooltipWindow tooltipWindow { nullptr, 600 };
     void showTuner (int channel);
 
-    juce::TextButton audioButton { "Audio..." },
-                     reloadButton { juce::String (juce::CharPointer_UTF8 ("\xe2\x86\xbb")) }; // recargar
+    juce::TextButton audioButton { "Audio..." }, reloadButton;   // recargar (icono)
     juce::Label statusLabel, pluginLabel;
+    juce::StringArray statusChips;            // 48 kHz, buffer, latencia (la última)
+    juce::Colour latencyColour;
 
-    juce::Label channelsTitle { {}, "ENTRADAS" };
+    juce::Label channelsTitle { {}, "Entradas" };
     juce::TextButton addGuitarButton { "+ GUITARRA" }, addAudioButton { "+ AUDIO" }, addMidiButton { "+ MIDI" },
                      addPcButton { "+ PC" };
     std::vector<std::unique_ptr<ChannelRow>> channelRows;
     juce::Rectangle<int> channelsArea;
 
-    juce::TextButton recButton { "REC" }, playButton { "PLAY" }, undoButton { "UNDO" },
-                     redoButton { "REDO" },
+    juce::TextButton recButton { "REC" }, playButton { "PLAY" }, undoButton, redoButton,   // deshacer / rehacer: iconos
                      metroButton { "METRONOMO" }, keysButton { "Teclas..." },
-                     waitButton { "REC AL TOCAR" }, tapButton { "TAP" };
-    juce::Label bpmLabel, helpLabel;
+                     waitButton { "REC AL TOCAR" }, tapButton { "TAP" }, bpmDownButton, bpmUpButton;
+    juce::Label bpmLabel;
+    float dragStartBpm = 0.0f;
+    bool draggingBpm = false;             // arrastrando los BPM arriba / abajo
 
     std::unique_ptr<PresetPanel> presetPanel;
     juce::Label presetTitle { {}, "PRESETS" };
     juce::TextButton presetsToggle { juce::String (juce::CharPointer_UTF8 ("\xe2\x98\xb0")) };   // ☰
 
     juce::TextButton exportButton { "EXPORTAR MP3" };
-    juce::DrawableButton folderButton { "Carpeta", juce::DrawableButton::ImageFitted };
-    juce::DrawableButton clearButton { "Borrar todo", juce::DrawableButton::ImageOnButtonBackground };
+    juce::TextButton folderButton, clearButton;   // iconos
     juce::ComboBox loopsBox;
     juce::Label exportLabel;
 
     std::vector<std::unique_ptr<TrackRow>> rows;
     juce::String trackSignature;
 
-    float inLevel = 0.0f, outLevel = 0.0f;
+    theme::Meter inLevel, outLevel;
     std::vector<double> tapTimes;         // últimos toques de TAP (ms)
     bool seeking = false;                 // arrastrando el cursor de la barra del loop
     int midiCheckTicks = 0;
@@ -111,7 +113,9 @@ private:
     int dawPage = pageInputs;             // sesión del Launchkey (flechas ↑ / ↓)
     int dawMenuNote = -1;                 // pad que abrió el menú que está abierto
     bool dawPan = false;                  // perillas del Launchkey en modo Pan
-    juce::Rectangle<int> inMeter, outMeter, loopBar, tracksArea, emptyHint;
+    juce::Rectangle<int> inMeter, outMeter, loopBar, tracksArea, emptyHint, transportCard, looperTitle,
+                         chipsArea, bpmBox;
+    juce::Array<juce::Rectangle<int>> dividers;   // separadores entre grupos de botones
 
     juce::String loadingTitle, loadingDetail;   // aviso "Cargando..." (vacío = no hay)
     int loadingToken = 0;

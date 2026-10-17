@@ -1,4 +1,5 @@
 #include "VoiceChain.h"
+#include "Theme.h"
 
 // Estilos. La reverb y el delay vienen bajos para cantar en vivo (con parlantes se acumulan).
 const VoiceChain::Style VoiceChain::styles[VoiceChain::numStyles] =
@@ -365,7 +366,6 @@ namespace
                 s->setTextValueSuffix (k.suffix);
                 s->setValue (k.value.load(), juce::dontSendNotification);
                 s->setDoubleClickReturnValue (true, k.defaultValue);
-                s->setColour (juce::Slider::rotarySliderFillColourId, juce::Colour (0xffff8a1f));
                 s->onValueChange = [this, i, s] { voice.knobs[i].value = (float) s->getValue(); };
                 addAndMakeVisible (s);
 
@@ -377,7 +377,7 @@ namespace
                 auto* help = helps.add (new juce::Label ({}, k.help));
                 help->setJustificationType (juce::Justification::centredTop);
                 help->setFont (juce::FontOptions (11.0f));
-                help->setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
+                help->setColour (juce::Label::textColourId, theme::textSecondary);
                 help->setMinimumHorizontalScale (1.0f);
                 addAndMakeVisible (help);
             }
@@ -394,12 +394,12 @@ namespace
 
         void paint (juce::Graphics& g) override
         {
-            g.fillAll (juce::Colour (0xff1b1d21));
-            g.setColour (juce::Colour (0xffff8a1f));
-            g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+            g.fillAll (theme::background);
+            g.setColour (theme::accent);
+            g.setFont (theme::heading (20.0f));
             g.drawText ("VOZ " + juce::String (voice.style.name).toUpperCase(), 16, 10, 300, 24,
                         juce::Justification::centredLeft);
-            g.setColour (juce::Colours::white.withAlpha (0.5f));
+            g.setColour (theme::textSecondary);
             g.setFont (juce::FontOptions (11.5f));
             g.drawText (juce::String (juce::CharPointer_UTF8 (voice.style.chainText)),
                         16, 34, getWidth() - 32, 18, juce::Justification::centredLeft);

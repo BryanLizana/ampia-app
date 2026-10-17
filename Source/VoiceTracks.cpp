@@ -1,8 +1,9 @@
 #include "VoiceTracks.h"
+#include "Theme.h"
 
 namespace
 {
-    const juce::Colour background (0xff1b1d21), accent (0xffff8a1f);
+    using theme::background, theme::accent;
 
     class VoiceWindow : public juce::DocumentWindow
     {
@@ -38,7 +39,7 @@ public:
         addAndMakeVisible (styleBox);
 
         hint.setText ("Cambia la voz de lo ya grabado", juce::dontSendNotification);
-        hint.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.6f));
+        hint.setColour (juce::Label::textColourId, theme::textSecondary);
         addAndMakeVisible (hint);
 
         status.setJustificationType (juce::Justification::centredRight);

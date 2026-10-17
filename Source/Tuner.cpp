@@ -1,9 +1,10 @@
 #include "Tuner.h"
+#include "Theme.h"
 
 namespace
 {
-    const juce::Colour background (0xff1b1d21), panel (0xff26292f), accent (0xffff8a1f),
-                       green (0xff3fb950), red (0xffe0393e);
+    using theme::background, theme::panel, theme::accent, theme::text;
+    const juce::Colour green (theme::playGreen), red (theme::recRed);
 
     const char* const letterNames[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     const char* const solfegeNames[] = { "DO", "DO#", "RE", "RE#", "MI", "FA", "FA#", "SOL", "SOL#", "LA", "LA#", "SI" };
@@ -49,13 +50,13 @@ namespace
 
             const bool sounding = note >= 0 && juce::Time::getMillisecondCounter() - lastHeard < 400;
             const bool inTune = sounding && std::abs (cents) <= 5.0f;
-            const auto colour = ! sounding ? juce::Colours::grey
+            const auto colour = ! sounding ? theme::textMuted
                               : inTune ? green : std::abs (cents) <= 15.0f ? accent : red;
 
             // Arriba: nota, cents y frecuencia.
             auto header = r.removeFromTop (54).reduced (14, 6);
             g.setColour (colour);
-            g.setFont (juce::FontOptions (34.0f, juce::Font::bold));
+            g.setFont (theme::heading (36.0f));
             g.drawText (sounding ? noteName (note) : juce::String ("--"), header.removeFromLeft (150),
                         juce::Justification::centredLeft);
 
@@ -66,7 +67,7 @@ namespace
                                        : "ALTO " + juce::String (juce::roundToInt (cents)) + " cents",
                         header.removeFromLeft (170), juce::Justification::centredLeft);
 
-            g.setColour (juce::Colours::white.withAlpha (0.55f));
+            g.setColour (theme::textSecondary);
             g.setFont (juce::FontOptions (13.0f));
             g.drawText (paused ? juce::String ("PAUSA (clic para seguir)")
                         : sounding ? juce::String (frequency, 1) + " Hz   " + juce::String (letterNames[note % 12])
@@ -91,9 +92,9 @@ namespace
                 const auto row = [&] (juce::Rectangle<int> area)
                     { return juce::Rectangle<float>::leftTopRightBottom ((float) area.getX(), top, (float) area.getRight(), bottom); };
 
-                g.setColour (black ? juce::Colour (0xff15171a) : panel.darker (0.35f));
+                g.setColour (black ? juce::Colour (0xfff2f2f2) : panel);
                 g.fillRect (row (plot));
-                g.setColour (black ? juce::Colour (0xff111214) : juce::Colour (0xffd8d8d8));
+                g.setColour (black ? juce::Colour (0xff3a3a3a) : panel);
                 g.fillRect (row (keys).withTrimmedRight (black ? 22.0f : 0.0f));
 
                 if (sounding && n == note)
@@ -105,12 +106,12 @@ namespace
                 }
 
                 // Línea entre notas; más marcada entre SI y DO (cambio de octava).
-                g.setColour (juce::Colours::white.withAlpha (n % 12 == 0 ? 0.25f : 0.07f));
+                g.setColour (text.withAlpha (n % 12 == 0 ? 0.25f : 0.08f));
                 g.fillRect ((float) keys.getX(), bottom - 0.5f, (float) (plot.getRight() - keys.getX()), 1.0f);
 
                 if (! black && (rowH >= 11.0f || n % 12 == 0))
                 {
-                    g.setColour (sounding && n == note ? juce::Colours::white : juce::Colour (0xff303236));
+                    g.setColour (sounding && n == note ? theme::onAccent : theme::textSecondary);
                     g.setFont (juce::FontOptions (juce::jlimit (9.0f, 13.0f, rowH * 0.8f),
                                                   n % 12 == 0 ? juce::Font::bold : juce::Font::plain));
                     g.drawText (noteName (n), row (keys).reduced (4.0f, 0.0f), juce::Justification::centredRight);
@@ -143,7 +144,7 @@ namespace
                 previous = m;
             }
 
-            g.setColour (juce::Colour (0xff4fc3f7));
+            g.setColour (theme::loopBlue);
             g.strokePath (line, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
             // El punto de ahora, con el color de la afinación.

@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "Crash.h"
+#include "Theme.h"
 
 class AmpBoxApplication : public juce::JUCEApplication
 {
@@ -11,9 +12,15 @@ public:
     void initialise (const juce::String&) override
     {
         installCrashHandler();
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         mainWindow = std::make_unique<MainWindow> (getApplicationName());
     }
-    void shutdown() override                       { mainWindow = nullptr; }
+    void shutdown() override
+    {
+        mainWindow = nullptr;
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+    }
+
     void systemRequestedQuit() override            { quit(); }
 
 private:
@@ -21,7 +28,7 @@ private:
     {
     public:
         explicit MainWindow (const juce::String& name)
-            : DocumentWindow (name, juce::Colour (0xff1b1d21), allButtons)
+            : DocumentWindow (name, theme::background, allButtons)
         {
             setUsingNativeTitleBar (true);
             setContentOwned (new MainComponent(), true);
@@ -33,6 +40,7 @@ private:
         void closeButtonPressed() override { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
     };
 
+    theme::LookAndFeel lookAndFeel;
     std::unique_ptr<MainWindow> mainWindow;
 };
 

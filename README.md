@@ -15,6 +15,7 @@ Looper multipista para tocar en vivo en Windows. Carga amplificadores y efectos 
 - **SEPARAR**: saca la batería o el bajo de una pista con Demucs.
 - **Presets de AmpliTube 5**: los favoritos se cargan con Ctrl+1-9.
 - **Teclado y Launchkey MK3**: las teclas se pueden reasignar (botón *Teclas...*). Si hay un Launchkey MK3, se usa en modo DAW.
+- **Interfaz**: modo claro, con un color por tipo de botón: rojo para grabar, verde para sonar, azul para exportar, morado para el tempo y naranja para agregar entradas. Los atajos aparecen en el tooltip de cada botón. Las fuentes (Inter y Source Serif 4, licencia OFL) van dentro del ejecutable.
 
 ## Compilar
 
